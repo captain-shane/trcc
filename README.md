@@ -1,5 +1,11 @@
 # TR Command Center
 
+> **Flavor branch: `palo-alto`** — ships with Palo Alto Networks SASE
+> taxonomy defaults (Prisma Access, SD-WAN, ADEM, …), SASE-flavored demo
+> data, and `sfdc` as the official-record tag. For the vendor-neutral
+> defaults, use `main`. Only defaults and demo data differ — the app is
+> identical, and everything here is editable in Settings anyway.
+
 Local-first **Technical Request (TR)** tracking: log customer/stakeholder
 engagements, dump raw interaction notes, and turn them into polished exec
 summaries, catch-up digests, period reports, and question-driven reviews —
@@ -22,17 +28,6 @@ Built on three principles:
 3. **Deterministic before generative.** Stats, health states, and report
    numbers are computed in code. The model only ever writes narrative from
    those facts plus your tagged "official record" — it cannot invent totals.
-
-## Flavors
-
-- **`main`** — vendor-neutral defaults: generic value themes, `official` as
-  the official-record tag, and neutral demo data. Start here.
-- **`palo-alto`** — the same app with Palo Alto Networks SASE defaults
-  (Prisma Access / SD-WAN / ADEM themes, `sfdc` tag, SASE-flavored demo
-  data) for SE teams in that ecosystem.
-
-Only defaults and demo data differ — and every default is editable in
-Settings afterwards anyway.
 
 ## Features
 

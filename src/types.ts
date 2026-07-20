@@ -30,8 +30,8 @@ export const DEFAULT_OUTCOMES = [
 ];
 
 export const DEFAULT_THEMES = [
-  'Cloud', 'Networking', 'Security', 'Identity', 'Data & Analytics', 'AI/ML',
-  'Observability', 'Automation', 'Integration', 'Compliance', 'Endpoint', 'Other',
+  'Prisma Access', 'SD-WAN', 'ADEM', 'RUM', 'CASB', 'DLP', 'AI Access',
+  'ZTNA', 'Prisma Browser', 'Colo', 'SCM', 'Panorama', 'VDI', 'Other',
 ];
 
 export const DEFAULT_CLOSED_STATUSES = ['Closed Won', 'Closed Lost', 'Archived'];

@@ -418,7 +418,7 @@ export function defaultSettings(): Settings {
     roles: [...DEFAULT_ROLES],
     outcomes: [...DEFAULT_OUTCOMES],
     themes: [...DEFAULT_THEMES],
-    officialTag: 'official',
+    officialTag: 'sfdc',
     model: config.defaultModel,
     digestModel: config.defaultDigestModel,
     embedModel: config.defaultEmbedModel,
