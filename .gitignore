@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Runtime data — holds real customer data, never commit
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Porting reference snapshots (v1 prod code + data)
+reference/
+
+# Environment
+.env
+.env.local
+
+# Security (fleet ROE 1.7)
+*secrets*
+*credentials*
+*.key
+*.pem
+
+# Editor/OS noise
+.DS_Store
+*.log

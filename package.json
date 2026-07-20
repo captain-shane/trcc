@@ -1,0 +1,31 @@
+{
+  "name": "trcc",
+  "version": "2.0.0",
+  "description": "TR Command Center — local-first Technical Request tracking with optional local-model-powered summaries, digests, and reviews. Server-rendered, SQLite-backed, no build step.",
+  "author": "The Cloud Pirates",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "import": "tsx scripts/import-v1.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

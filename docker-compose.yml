@@ -1,0 +1,22 @@
+services:
+  trr:
+    build: .
+    container_name: trcc
+    ports:
+      - "${TRR_PORT:-3000}:3000"
+    environment:
+      # The only external endpoint the app talks to: your local model server —
+      # Ollama, LM Studio, llama.cpp, vLLM, or any OpenAI-compatible endpoint.
+      # Protocol (Ollama-native vs OpenAI-compatible) is auto-detected.
+      AI_URL: ${AI_URL:-http://host.docker.internal:11434}
+      AI_MODEL: ${AI_MODEL:-gemma4-16k:latest}
+      AI_DIGEST_MODEL: ${AI_DIGEST_MODEL:-gemma4:26b}
+      AI_EMBED_MODEL: ${AI_EMBED_MODEL:-nomic-embed-text}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - trr-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  trr-data:

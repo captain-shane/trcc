@@ -1,0 +1,216 @@
+import { beforeAll, describe, expect, it } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// Point the app at a throwaway DB before any module under test loads.
+process.env.DB_PATH = join(mkdtempSync(join(tmpdir(), 'trr-test-')), 'test.db');
+
+const repo = await import('../src/db/repo.js');
+const { seedIfEmpty } = await import('../src/db/seed.js');
+const { computePeriodDigest } = await import('../src/services/digest.js');
+const { textSearch } = await import('../src/services/search.js');
+const { uid } = await import('../src/types.js');
+const { esc } = await import('../src/views/html.js');
+
+beforeAll(() => {
+  seedIfEmpty();
+});
+
+describe('seed + repo', () => {
+  it('seeds TRRs and interactions', () => {
+    const c = repo.counts();
+    expect(c.trrs).toBeGreaterThanOrEqual(10);
+    expect(c.interactions).toBeGreaterThanOrEqual(28);
+  });
+
+  it('sets last_contact from interactions', () => {
+    for (const t of repo.listTrrs('all')) {
+      const ints = repo.listInteractions(t.id);
+      if (ints.length) expect(t.lastContact).toBe(ints[0]!.date); // list is date-desc
+    }
+  });
+
+  it('round-trips a TRR with structured fields', () => {
+    const id = uid();
+    repo.insertTrr({
+      id, customer: 'Test Co', title: 'Roundtrip', status: 'New', complexity: 'Simple',
+      priority: 'Low', contact: '', rep: '', targetClose: '', description: '',
+      myRole: 'Lead', outcome: 'Ongoing', valueThemes: ['Networking', 'Automation'],
+      deactivated: false, deactivatedAt: '', createdAt: new Date().toISOString(), lastContact: '',
+    });
+    const t = repo.getTrr(id)!;
+    expect(t.myRole).toBe('Lead');
+    expect(t.valueThemes).toEqual(['Networking', 'Automation']);
+    repo.updateTrr(id, { status: 'POC', deactivated: true, deactivatedAt: new Date().toISOString() });
+    expect(repo.getTrr(id)!.status).toBe('POC');
+    expect(repo.getTrr(id)!.deactivated).toBe(true);
+    repo.deleteTrr(id);
+    expect(repo.getTrr(id)).toBeNull();
+  });
+
+  it('records an audit trail of tracked field changes', () => {
+    const id = uid();
+    repo.insertTrr({
+      id, customer: 'Audit Co', title: 'x', status: 'New', complexity: 'Simple',
+      priority: 'Low', contact: '', rep: '', targetClose: '', description: '',
+      myRole: '', outcome: '', valueThemes: ['Security'],
+      deactivated: false, deactivatedAt: '', createdAt: new Date().toISOString(), lastContact: '',
+    });
+    repo.updateTrr(id, { status: 'POC', myRole: 'Lead', valueThemes: ['Security', 'Cloud'] });
+    repo.updateTrr(id, { status: 'Closed Won', outcome: 'Closed Won' });
+    const hist = repo.listHistory(id);
+    const asPairs = hist.map(h => `${h.field}:${h.oldValue}->${h.newValue}`);
+    expect(asPairs).toContain('created:->New');
+    expect(asPairs).toContain('status:New->POC');
+    expect(asPairs).toContain('my role:->Lead');
+    expect(asPairs).toContain('value themes:Security->Security, Cloud');
+    expect(asPairs).toContain('status:POC->Closed Won');
+    expect(asPairs).toContain('outcome:->Closed Won');
+    // untouched fields produce no entries
+    expect(hist.filter(h => h.field === 'complexity')).toHaveLength(0);
+    repo.deleteTrr(id);
+    expect(repo.listHistory(id)).toHaveLength(0); // cascades
+  });
+
+  it('cascades interaction deletes with the TRR', () => {
+    const id = uid();
+    repo.insertTrr({
+      id, customer: 'Cascade Co', title: 'x', status: 'New', complexity: 'Simple',
+      priority: 'Low', contact: '', rep: '', targetClose: '', description: '',
+      myRole: '', outcome: '', valueThemes: [],
+      deactivated: false, deactivatedAt: '', createdAt: new Date().toISOString(), lastContact: '',
+    });
+    repo.insertInteraction({
+      id: uid(), trrId: id, type: 'Call', date: '2026-07-01', note: 'hello world',
+      aiExec: '', aiCust: '', sensitive: false, createdAt: new Date().toISOString(),
+    });
+    expect(repo.listInteractions(id)).toHaveLength(1);
+    repo.deleteTrr(id);
+    expect(repo.listInteractions(id)).toHaveLength(0);
+  });
+});
+
+describe('period digest (deterministic)', () => {
+  it('computes totals from seed data', () => {
+    const d = computePeriodDigest(); // all time
+    expect(d.totals.engagements).toBeGreaterThanOrEqual(10);
+    expect(d.totals.interactions).toBeGreaterThanOrEqual(28);
+    expect(d.closedWon.length).toBeGreaterThanOrEqual(1);
+    expect(d.closedLost.length).toBeGreaterThanOrEqual(1);
+    expect(d.totals.officialUpdates).toBeGreaterThanOrEqual(4); // tagged/stamped notes in seed
+  });
+
+  it('respects date windows', () => {
+    const none = computePeriodDigest('1990-01-01', '1990-12-31');
+    expect(none.totals.interactions).toBe(0);
+    expect(none.totals.engagements).toBe(0);
+  });
+
+  it('uses structured valueThemes for theme coverage', () => {
+    const d = computePeriodDigest();
+    expect(Object.keys(d.themeCoverage).length).toBeGreaterThanOrEqual(2);
+    // every covered theme must come from at least one TR's structured field or description
+    expect(Math.max(...Object.values(d.themeCoverage))).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('review scoping', () => {
+  it('filters by role (pre-sale vs post-sale style)', async () => {
+    const { buildContext } = await import('../src/services/review.js');
+    const all = buildContext({});
+    const leads = buildContext({ roles: ['Lead'] });
+    expect(leads.trrCount).toBeGreaterThan(0);
+    expect(leads.trrCount).toBeLessThan(all.trrCount);
+    expect(leads.engagements).toContain('my role: Lead');
+    expect(leads.engagements).not.toContain('my role: Supporting');
+  });
+
+  it('filters by theme overlap', async () => {
+    const { buildContext } = await import('../src/services/review.js');
+    // pick a theme from the seed and a TR that does NOT carry it
+    const all = repo.listTrrs('all');
+    const withTheme = all.find(t => t.valueThemes.length > 0)!;
+    const theme = withTheme.valueThemes[0]!;
+    const without = all.find(t => !t.valueThemes.includes(theme))!;
+    const scoped = buildContext({ themes: [theme] });
+    expect(scoped.trrCount).toBeGreaterThanOrEqual(1);
+    expect(scoped.engagements).toContain(withTheme.customer);
+    expect(scoped.engagements).not.toContain(without.customer);
+  });
+
+  it('date window excludes out-of-range interactions', async () => {
+    const { buildContext } = await import('../src/services/review.js');
+    const narrow = buildContext({ from: '1990-01-01', to: '1990-12-31' });
+    expect(narrow.interactionCount).toBe(0);
+  });
+
+  it('scoped digest counts only in-scope interactions', () => {
+    const all = computePeriodDigest();
+    const scoped = computePeriodDigest(undefined, undefined, t => t.myRole === 'Lead');
+    expect(scoped.totals.interactions).toBeLessThan(all.totals.interactions);
+    expect(scoped.totals.engagements).toBeLessThan(all.totals.engagements);
+  });
+});
+
+describe('text search', () => {
+  it('finds seeded notes via FTS', () => {
+    const hits = textSearch('failover');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0]!.snippet).toContain('<mark>');
+  });
+
+  it('escapes note content in snippets', () => {
+    const id = uid();
+    repo.insertTrr({
+      id, customer: 'XSS Co', title: 'x', status: 'New', complexity: 'Simple',
+      priority: 'Low', contact: '', rep: '', targetClose: '', description: '',
+      myRole: '', outcome: '', valueThemes: [],
+      deactivated: false, deactivatedAt: '', createdAt: new Date().toISOString(), lastContact: '',
+    });
+    repo.insertInteraction({
+      id: uid(), trrId: id, type: 'Note', date: '2026-07-02',
+      note: 'zebra <script>alert(1)</script> zebra',
+      aiExec: '', aiCust: '', sensitive: false, createdAt: new Date().toISOString(),
+    });
+    const hits = textSearch('zebra');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0]!.snippet).not.toContain('<script>');
+    expect(hits[0]!.snippet).toContain('&lt;script&gt;');
+    repo.deleteTrr(id);
+  });
+});
+
+// NOTE: destructive — keep this block LAST in the file.
+describe('demo data management', () => {
+  it('removes exactly the seeded demo data, then reseeds', () => {
+    const before = repo.counts();
+    expect(repo.seededTrrIds().length).toBeGreaterThanOrEqual(10);
+    const removed = repo.removeSeedData();
+    expect(removed).toBeGreaterThanOrEqual(10);
+    const after = repo.counts();
+    expect(after.trrs).toBe(before.trrs - removed);
+    expect(repo.seededTrrIds()).toHaveLength(0);
+    // load-demo works again on an empty db
+    if (after.trrs === 0) {
+      expect(seedIfEmpty()).toBe(true);
+      expect(repo.counts().trrs).toBeGreaterThanOrEqual(10);
+    }
+  });
+
+  it('erases everything but keeps settings', () => {
+    repo.saveSettings({ greenDays: 7 });
+    repo.eraseAllData();
+    const c = repo.counts();
+    expect(c.trrs).toBe(0);
+    expect(c.interactions).toBe(0);
+    expect(c.digests).toBe(0);
+    expect(repo.getSettings().greenDays).toBe(7); // settings survive
+  });
+});
+
+describe('html escaping', () => {
+  it('escapes the usual suspects', () => {
+    expect(esc(`<a href="x" onclick='y'>&`)).toBe('&lt;a href=&quot;x&quot; onclick=&#39;y&#39;&gt;&amp;');
+  });
+});
