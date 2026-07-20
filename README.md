@@ -152,8 +152,35 @@ search index — made with `VACUUM INTO`, safe while running):
   and the swap happens on restart (automatic under Docker/systemd)
 - **JSON export** — a portable dump of everything, for scripting or migration
 
-Backups live inside the data directory (`data/backups/`, i.e. on the Docker
-volume) — copy them somewhere off-box for real disaster recovery.
+### Recommended practice
+
+1. **Leave daily auto-backup on.** It protects against mistakes — a deleted
+   TR or a bad bulk edit is one click from undone (and even a restore keeps
+   a safety copy of what it replaced).
+2. **Get copies off the box.** Backups live next to the database
+   (`data/backups/` on the Docker volume), so they survive mistakes — not a
+   dead disk. Every backup is a plain file at a stable URL, so automate it
+   from any machine that can reach the app:
+
+   ```bash
+   # grab the newest backup (cron-friendly)
+   name=$(curl -s http://localhost:3000/api/backups | jq -r '.backups[0].name')
+   curl -sO "http://localhost:3000/data/backups/$name"
+   ```
+
+   Or bind-mount `./data` instead of a named volume and point
+   rsync/restic/Syncthing at `data/backups/`.
+3. **Keep `.env` with your off-box copies.** The model-server URL and port
+   live there, not in the database — it's the only thing a backup doesn't
+   carry.
+
+### Recovery
+
+- **Deleted something?** Settings → Backups → ♻️ restore on the newest
+  snapshot. The app restarts and you're back.
+- **Lost the host?** Install trcc anywhere (`docker compose up -d --build`),
+  open Settings → ♻️ Restore from file, upload your off-box `.db`.
+  Everything returns — data, taxonomies, templates, settings.
 
 ## AI-free mode
 

@@ -41,6 +41,11 @@ api.get('/reports', (_req, res) => {
   });
 });
 
+api.get('/backups', async (_req, res) => {
+  const { listBackups } = await import('../services/backup.js');
+  res.json({ backups: listBackups() }); // newest first; download at /data/backups/<name>
+});
+
 api.get('/models', async (_req, res) => {
   try {
     res.json({ models: await listModels() });
