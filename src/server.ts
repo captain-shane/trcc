@@ -17,6 +17,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 if ((process.env.SEED_ON_EMPTY ?? 'true') !== 'false') seedIfEmpty();
 
 const app = express();
+// Restore uploads arrive as a raw body on this one route (no multipart dep).
+app.use('/data/restore', express.raw({ type: () => true, limit: '2gb' }));
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: false, limit: '5mb' })); // large pasted notes are a first-class use case
 
@@ -56,6 +58,25 @@ async function backfillTick(force = false): Promise<void> {
 }
 setInterval(() => void backfillTick(), 15 * 60_000);
 setTimeout(() => void backfillTick(true), 2 * 60_000); // shortly after boot
+
+// --- Daily auto-backup -------------------------------------------------------
+import { createBackup, listBackups, pruneBackups } from './services/backup.js';
+
+function maybeAutoBackup(): void {
+  const s = getSettings();
+  if (!s.autoBackupEnabled) return;
+  const newest = listBackups()[0];
+  if (newest && Date.now() - new Date(newest.createdAt).getTime() < 24 * 3_600_000) return;
+  try {
+    const b = createBackup('trcc-auto');
+    pruneBackups(s.backupKeep);
+    console.log(`auto-backup: ${b.name}`);
+  } catch (e) {
+    console.warn(`auto-backup failed: ${(e as Error).message}`);
+  }
+}
+setInterval(maybeAutoBackup, 15 * 60_000);
+setTimeout(maybeAutoBackup, 60_000); // shortly after boot
 
 app.listen(config.port, () => {
   const c = counts();

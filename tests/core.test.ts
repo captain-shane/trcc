@@ -181,6 +181,56 @@ describe('text search', () => {
   });
 });
 
+describe('backup & restore', () => {
+  it('creates a valid, complete snapshot', async () => {
+    const { createBackup, listBackups, backupPath, validateSnapshot } = await import('../src/services/backup.js');
+    const before = repo.counts();
+    const b = createBackup('test');
+    expect(b.bytes).toBeGreaterThan(10_000);
+    expect(listBackups().some(x => x.name === b.name)).toBe(true);
+    const p = backupPath(b.name)!;
+    expect(validateSnapshot(p)).toEqual({ ok: true });
+    // snapshot contains the same data
+    const Database = (await import('better-sqlite3')).default;
+    const snap = new Database(p, { readonly: true });
+    const n = (snap.prepare('SELECT count(*) n FROM trrs').get() as { n: number }).n;
+    snap.close();
+    expect(n).toBe(before.trrs);
+  });
+
+  it('prunes to the retention limit', async () => {
+    const { createBackup, listBackups, pruneBackups } = await import('../src/services/backup.js');
+    createBackup('test'); createBackup('test'); createBackup('test');
+    pruneBackups(2);
+    expect(listBackups().length).toBe(2);
+  });
+
+  it('rejects garbage uploads', async () => {
+    const { stageRestore } = await import('../src/services/backup.js');
+    const r = stageRestore(Buffer.from('this is not a sqlite database at all, not even close'));
+    expect(r.ok).toBe(false);
+  });
+
+  it('refuses path traversal in backup names', async () => {
+    const { backupPath } = await import('../src/services/backup.js');
+    expect(backupPath('../../etc/passwd')).toBeNull();
+    expect(backupPath('..%2Fescape.db')).toBeNull();
+  });
+
+  it('boot-time swap promotes a staged restore with a safety copy', async () => {
+    const { swapPendingRestore } = await import('../src/db/index.js');
+    const { mkdtempSync, writeFileSync, readFileSync, readdirSync } = await import('node:fs');
+    const dir = mkdtempSync(join(tmpdir(), 'trr-swap-'));
+    const dbPath = join(dir, 'app.db');
+    writeFileSync(dbPath, 'OLD');
+    writeFileSync(join(dir, 'restore-pending.db'), 'NEW');
+    expect(swapPendingRestore(dbPath)).toBe(true);
+    expect(readFileSync(dbPath, 'utf8')).toBe('NEW');
+    expect(readdirSync(dir).some(f => f.startsWith('pre-restore-'))).toBe(true);
+    expect(swapPendingRestore(dbPath)).toBe(false); // nothing staged now
+  });
+});
+
 // NOTE: destructive — keep this block LAST in the file.
 describe('demo data management', () => {
   it('removes exactly the seeded demo data, then reseeds', () => {

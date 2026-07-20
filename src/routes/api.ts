@@ -14,6 +14,10 @@ api.get('/export', (_req, res) => {
     trrs: repo.listTrrs('all'),
     interactions: repo.allInteractions(),
     digests: repo.listDigests(),
+    history: repo.allHistory(),
+    periodReports: repo.listPeriodReports().map(m => repo.getPeriodReport(m.id)),
+    reviews: repo.listReviews().map(m => repo.getReview(m.id)),
+    settings: repo.getSettings(),
   });
 });
 

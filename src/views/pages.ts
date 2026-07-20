@@ -546,6 +546,11 @@ export interface DataInfo {
   interactions: number;
   digests: number;
   seeded: number;
+  backups: { name: string; bytes: number; createdAt: string }[];
+}
+
+function fmtBytes(n: number): string {
+  return n > 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
 }
 
 export function settingsPage(s: Settings, aiUrl: string, models: string[] | null, apiStyle: string | undefined, data: DataInfo): string {
@@ -596,7 +601,9 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
         ${field('Yellow ≤ (days)', `<input type="number" name="yellowDays" value="${s.yellowDays}" min="1">`)}
         ${field('Archive window (days)', `<input type="number" name="archiveDays" value="${s.archiveDays}" min="1">`)}
         ${field('Auto-backfill every (hours, 0 = off)', `<input type="number" name="autoBackfillHours" value="${s.autoBackfillHours}" min="0">`)}
+        ${field('Backups to keep', `<input type="number" name="backupKeep" value="${s.backupKeep}" min="1">`)}
       </div>
+      <label class="check"><input type="checkbox" name="autoBackupEnabled" value="1" ${s.autoBackupEnabled ? 'checked' : ''}> Daily automatic database backup</label>
       <div class="small muted2">Auto-backfill drains the exec-summary backlog in the background on this schedule (also runs shortly after startup).</div>
     </div>
     <div class="card">
@@ -629,7 +636,48 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
       <form method="post" action="/data/erase-all" onsubmit="return confirm('ERASE ALL DATA — every TR, interaction, digest, report, and review. Settings survive. This cannot be undone. Continue?')">
         <button class="btn btn-outline danger" type="submit">💣 Erase ALL data</button>
       </form>
+      <a class="btn btn-outline" href="/api/export" download="trcc-export.json">📤 JSON export</a>
     </div>
+  </div>
+
+  <div class="card">
+    <h3>Backups & restore</h3>
+    <div class="small muted" style="margin-bottom:8px">A backup is a complete, consistent snapshot of the database — every TR, note, digest, report, review, setting, and search index. ${s.autoBackupEnabled ? `Daily auto-backup is ON (keeping ${s.backupKeep}).` : 'Daily auto-backup is OFF.'}</div>
+    <div class="row wrap" style="margin-bottom:10px">
+      <form method="post" action="/data/backup-now">
+        <button class="btn" type="submit">💾 Back up now</button>
+      </form>
+      <form x-data @submit.prevent="
+        const f = $refs.file.files[0];
+        if (!f) { $refs.out.textContent = 'Pick a .db file first.'; return; }
+        if (!confirm('Restore from ' + f.name + '? Current data is replaced (a safety copy is kept) and the app restarts.')) return;
+        $refs.out.textContent = 'Uploading…';
+        const r = await fetch('/data/restore', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f });
+        $refs.out.textContent = await r.text();" class="row">
+        <input type="file" x-ref="file" accept=".db" style="width:auto">
+        <button class="btn btn-outline" type="submit">♻️ Restore from file</button>
+        <span class="small muted2" x-ref="out"></span>
+      </form>
+    </div>
+    ${data.backups.length === 0 ? '<div class="small muted2">No stored backups yet.</div>' : `
+    <table class="table">
+      <thead><tr><th>Backup</th><th>Size</th><th>Created</th><th></th></tr></thead>
+      <tbody>${data.backups.map(b => `
+        <tr>
+          <td><a class="hl" href="/data/backups/${esc(b.name)}">${esc(b.name)}</a></td>
+          <td>${fmtBytes(b.bytes)}</td>
+          <td class="muted2">${esc(b.createdAt.slice(0, 16).replace('T', ' '))}</td>
+          <td class="row">
+            <form method="post" action="/data/backups/${esc(b.name)}/restore" onsubmit="return confirm('Restore ${esc(b.name)}? Current data is replaced (a safety copy is kept) and the app restarts.')">
+              <button class="btn btn-outline btn-sm" type="submit">♻️ restore</button>
+            </form>
+            <form method="post" action="/data/backups/${esc(b.name)}/delete" onsubmit="return confirm('Delete this backup?')">
+              <button class="btn btn-outline btn-sm danger" type="submit">🗑️</button>
+            </form>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`}
   </div>
   `);
 }

@@ -109,10 +109,12 @@ pages.get('/review/:id', (req, res) => {
 });
 
 pages.get('/settings', async (_req, res) => {
+  const { listBackups } = await import('../services/backup.js');
   const info = await serverInfo(); // null when unreachable
   const c = repo.counts();
   res.send(views.settingsPage(repo.getSettings(), config.aiUrl, info?.models ?? null, info?.style, {
     trrs: c.trrs, interactions: c.interactions, digests: c.digests,
     seeded: repo.seededTrrIds().length,
+    backups: listBackups(),
   }));
 });

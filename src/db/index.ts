@@ -1,10 +1,28 @@
 import Database from 'better-sqlite3';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, mkdirSync, renameSync, rmSync, copyFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { config } from '../config.js';
 
 // Single connection, synchronous access — ideal for a local single-user app.
 mkdirSync(dirname(config.dbPath), { recursive: true });
+
+// --- Restore swap (runs BEFORE the database is opened) ----------------------
+// If a validated restore is staged (services/backup.ts), swap it in now:
+// keep a safety copy of the current database, then promote the staged file.
+export function swapPendingRestore(dbPath: string): boolean {
+  const dir = dirname(resolve(dbPath));
+  const pending = join(dir, 'restore-pending.db');
+  if (!existsSync(pending)) return false;
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+  if (existsSync(dbPath)) copyFileSync(dbPath, join(dir, `pre-restore-${stamp}.db`));
+  rmSync(`${dbPath}-wal`, { force: true });
+  rmSync(`${dbPath}-shm`, { force: true });
+  renameSync(pending, dbPath);
+  console.log(`Restore applied from staged snapshot (safety copy: pre-restore-${stamp}.db)`);
+  return true;
+}
+
+swapPendingRestore(config.dbPath);
 
 export const db = new Database(config.dbPath);
 db.pragma('journal_mode = WAL');
@@ -142,6 +160,8 @@ const migrations: string[] = [
   );
   `,
 ];
+
+export const MIGRATION_COUNT = migrations.length;
 
 export function migrate(): void {
   const current = db.pragma('user_version', { simple: true }) as number;

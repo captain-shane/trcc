@@ -97,6 +97,8 @@ export interface Settings {
   yellowDays: number;    // <= N days => yellow, else red
   archiveDays: number;   // deactivation-to-archive window
   autoBackfillHours: number; // run an exec-summary backfill batch every N hours (0 = off)
+  autoBackupEnabled: boolean; // daily automatic database backups
+  backupKeep: number;         // how many backups to retain
   aiEnabled: boolean;    // global AI switch — off = fully usable without any local model server
   statuses: string[];        // editable taxonomy
   closedStatuses: string[];  // which statuses mean "closed" (archive tab, health)

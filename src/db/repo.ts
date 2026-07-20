@@ -123,6 +123,12 @@ export function recordHistory(trrId: string, field: string, oldValue: string, ne
   `).run(trrId, at ?? new Date().toISOString(), field, oldValue, newValue);
 }
 
+export function allHistory(): TrrHistoryEntry[] {
+  return (db.prepare('SELECT * FROM trr_history ORDER BY changed_at').all() as
+    { id: number; trr_id: string; changed_at: string; field: string; old_value: string; new_value: string }[])
+    .map(r => ({ id: r.id, trrId: r.trr_id, changedAt: r.changed_at, field: r.field, oldValue: r.old_value, newValue: r.new_value }));
+}
+
 export function listHistory(trrId: string): TrrHistoryEntry[] {
   return (db.prepare('SELECT * FROM trr_history WHERE trr_id = ? ORDER BY changed_at DESC, id DESC')
     .all(trrId) as { id: number; trr_id: string; changed_at: string; field: string; old_value: string; new_value: string }[])
@@ -404,6 +410,7 @@ Description: {{description}}
 export function defaultSettings(): Settings {
   return {
     greenDays: 3, yellowDays: 5, archiveDays: 30, autoBackfillHours: 24,
+    autoBackupEnabled: true, backupKeep: 14,
     aiEnabled: true,
     statuses: [...DEFAULT_STATUSES],
     closedStatuses: [...DEFAULT_CLOSED_STATUSES],
@@ -432,6 +439,7 @@ export function getSettings(): Settings {
 
 const SETTINGS_KEYS = new Set<keyof Settings>([
   'greenDays', 'yellowDays', 'archiveDays', 'autoBackfillHours',
+  'autoBackupEnabled', 'backupKeep',
   'aiEnabled', 'statuses', 'closedStatuses', 'archivedStatus',
   'roles', 'outcomes', 'themes', 'officialTag',
   'model', 'digestModel', 'embedModel',

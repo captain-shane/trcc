@@ -139,6 +139,22 @@ the auto-backfill timer, model selection per job, and every prompt template
 (summaries, digests, self-eval, review engine) — so tone and grounding rules
 are yours to tune.
 
+## Backups & restore
+
+**Settings → Backups & restore** manages full-fidelity snapshots of the
+SQLite database (every TR, note, digest, report, review, setting, and
+search index — made with `VACUUM INTO`, safe while running):
+
+- **Back up now** — creates a snapshot; each one is downloadable
+- **Daily auto-backup** — on by default, with a configurable retention count
+- **Restore** — upload a `.db` file or click restore on a stored backup.
+  The snapshot is validated, a safety copy of the current database is kept,
+  and the swap happens on restart (automatic under Docker/systemd)
+- **JSON export** — a portable dump of everything, for scripting or migration
+
+Backups live inside the data directory (`data/backups/`, i.e. on the Docker
+volume) — copy them somewhere off-box for real disaster recovery.
+
 ## AI-free mode
 
 Untick **Settings → Enable AI features** and the app runs with no local

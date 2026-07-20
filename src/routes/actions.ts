@@ -278,6 +278,57 @@ actions.post('/review/:id/delete', (req, res) => {
   res.redirect(303, '/review');
 });
 
+// --- Backups & restore ------------------------------------------------------
+
+import {
+  backupPath, createBackup, deleteBackup, listBackups, pruneBackups,
+  scheduleRestartForRestore, stageRestore,
+} from '../services/backup.js';
+
+actions.post('/data/backup-now', (_req, res) => {
+  const b = createBackup();
+  pruneBackups(repo.getSettings().backupKeep);
+  console.log(`Backup created: ${b.name} (${b.bytes} bytes)`);
+  res.redirect(303, '/settings');
+});
+
+actions.get('/data/backups/:name', (req, res) => {
+  const p = backupPath(req.params.name);
+  if (!p) return res.status(404).send('Not found');
+  res.download(p, req.params.name);
+});
+
+actions.post('/data/backups/:name/delete', (req, res) => {
+  deleteBackup(req.params.name);
+  res.redirect(303, '/settings');
+});
+
+const RESTART_PAGE = `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="6;url=/settings">
+<body style="background:#090b10;color:#c8d0e0;font-family:sans-serif;padding:40px">
+<h2>♻️ Restore staged — restarting…</h2>
+<p>The app applies the snapshot on startup (a safety copy of the current database is kept in the data directory).</p>
+<p>Under Docker/systemd it restarts automatically — this page reloads in a few seconds.
+If you run it manually (<code>npm run dev</code>), start it again yourself.</p></body>`;
+
+actions.post('/data/backups/:name/restore', (req, res) => {
+  const r = stageRestore({ backupName: req.params.name });
+  if (!r.ok) return res.status(400).send(`Restore rejected: ${r.reason}`);
+  res.send(RESTART_PAGE);
+  scheduleRestartForRestore();
+});
+
+/** Upload restore: raw body (see express.raw mount in server.ts). */
+actions.post('/data/restore', (req, res) => {
+  const body = req.body as Buffer;
+  if (!Buffer.isBuffer(body) || body.length < 512) {
+    return res.status(400).send('Restore rejected: no file received');
+  }
+  const r = stageRestore(body);
+  if (!r.ok) return res.status(400).send(`Restore rejected: ${r.reason}`);
+  res.send('Restore staged — restarting. Refresh in ~6 seconds.');
+  scheduleRestartForRestore();
+});
+
 // --- Data management --------------------------------------------------------
 
 actions.post('/data/remove-demo', (_req, res) => {
@@ -316,6 +367,8 @@ actions.post('/settings', (req, res) => {
     yellowDays: num(b.yellowDays, cur.yellowDays),
     archiveDays: num(b.archiveDays, cur.archiveDays),
     autoBackfillHours: num(b.autoBackfillHours, cur.autoBackfillHours, 0),
+    autoBackupEnabled: b.autoBackupEnabled === '1',
+    backupKeep: num(b.backupKeep, cur.backupKeep),
     aiEnabled: b.aiEnabled === '1',   // unchecked checkbox = absent = off
     statuses: lines(b.statuses, cur.statuses),
     closedStatuses: lines(b.closedStatuses, cur.closedStatuses),
