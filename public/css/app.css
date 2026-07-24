@@ -280,3 +280,20 @@ details[open] > summary { margin-bottom: 8px; }
 /* Per-question answer blocks — review forms take one field per question */
 .qa { border-top: 1px solid var(--line, #2a3039); padding-top: 10px; margin-top: 10px; }
 .qa:first-of-type { border-top: 0; padding-top: 0; margin-top: 4px; }
+
+/* Colour-blind-safe health indicator: distinct SHAPE per state (circle/triangle/
+   square) so it reads without relying on hue. Colour reinforces, never encodes
+   alone (WCAG 1.4.1). Focusable so the tooltip is reachable by keyboard. */
+.rag-glyph {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 700;
+  font-style: normal;
+  cursor: default;
+}
+.rag-glyph:focus-visible { outline: 2px solid var(--accent, #4c8dff); outline-offset: 2px; border-radius: 2px; }
+.rag-g-green  { color: var(--green); }
+.rag-g-yellow { color: var(--yellow); }
+.rag-g-red    { color: var(--red); }
