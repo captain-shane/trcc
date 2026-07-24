@@ -367,17 +367,25 @@ Q3. Skills/capabilities to prioritize next.
 === OFFICIAL UPDATES (tagged / timestamped) ===
 {{official}}`;
 
-const DEFAULT_REVIEW_TMPL = `You are helping the engineer write their own performance review from their engagement record. Answer EACH question below in first person ("I"), as separate numbered sections matching the question numbers.
+const DEFAULT_REVIEW_TMPL = `You are writing ONE answer to ONE question for the engineer's own performance self-evaluation, in their voice. Output ONLY the answer prose — no heading, no restating the question, no preamble, no sign-off. It will be pasted straight into a review form.
+
+HOW TO WRITE IT:
+- First person, past tense, confident but factual. A reviewer will read this.
+- Flowing paragraphs (2-4). NOT a numbered or bulleted list — unless the question explicitly asks you to enumerate.
+- Open with one sentence framing the period, then substantiate it. Where the question is about outcomes or impact, work the authoritative totals below into that opening.
+- Name the actual customers, products, and technical specifics from the evidence. Specificity is what makes a self-evaluation credible; vague claims read as padding.
+- Inline labels like "Results:" or "Impact:" are welcome where they help a reviewer skim a long answer.
+- Aim for roughly 300-500 words unless the instructions below say otherwise.
 
 STRICT GROUNDING RULES:
 - Use ONLY the engagement data provided below. Never invent customers, numbers, outcomes, or dates.
 - Do not claim I "led" or "owned" work unless the record says so (the "my role" field or an official update).
 - For improvement/reflection questions ("what could I do better?"), ground observations in patterns actually visible in the data — stalled engagements, long gaps between contacts, lost deals and their stated reasons, backlog left unfinished. Do not fabricate strengths or weaknesses.
-- Plain, factual, confident tone. If the data cannot answer part of a question, say so briefly rather than padding.
+- If the record genuinely cannot support part of the question, say so in one short sentence rather than padding.
 
 {{instructions}}
 
-=== QUESTIONS ===
+=== QUESTION ===
 {{questions}}
 
 === DETERMINISTIC FACTS (authoritative, computed in code) ===
@@ -386,7 +394,27 @@ STRICT GROUNDING RULES:
 === OFFICIAL UPDATES (tagged official-record / timestamped — what was actually reported upstream) ===
 {{official}}
 
-=== ENGAGEMENT DETAIL (compact) ===
+=== EVIDENCE GATHERED FROM THE FULL RECORD ===
+(The record was read in slices; every question-relevant finding from all slices is collected below. Facts above are authoritative for any counting.)
+{{findings}}`;
+
+// Map step. Run once per (question x record slice). Output stays terse on
+// purpose — these findings are concatenated back into the reduce prompt, so
+// verbosity here is what blows the budget at scale.
+const DEFAULT_REVIEW_MAP_TMPL = `You are gathering raw material for an engineer's performance review. Below is ONE SLICE of their engagement record and ONE question.
+
+Do NOT answer the question. Extract only the evidence in THIS SLICE that bears on it.
+
+RULES:
+- Use ONLY what appears in this slice. Never invent customers, dates, numbers, or outcomes.
+- Terse bullets. Each: the customer/engagement, the concrete fact, and the date when present.
+- Keep specifics worth quoting later — products, blockers, stated reasons for wins/losses, long gaps in contact, unfinished work.
+- If this slice has nothing relevant to the question, reply with exactly: NONE
+
+=== QUESTION ===
+{{question}}
+
+=== RECORD SLICE ({{slice}}) ===
 {{engagements}}`;
 
 const DEFAULT_TRR_DIGEST_TMPL = `Summarize this single customer engagement so I can get back up to speed on it quickly. Plain and factual, using ONLY the record below — never invent details.
@@ -422,11 +450,30 @@ export function defaultSettings(): Settings {
     model: config.defaultModel,
     digestModel: config.defaultDigestModel,
     embedModel: config.defaultEmbedModel,
+    // Conservative defaults: 16k matches the common "-16k" model variants. Raise
+    // to match a long-context model (e.g. 131072) only if the server can hold it.
+    ctxTokens: 16_384,
+    fastCtxTokens: 16_384,
+    reviewReserveTokens: 2_000,
+    reviewMaxCalls: 150,
+    // One neutral example so the feature is discoverable on a fresh install.
+    // Delete it or replace it with your own review form's questions.
+    questionSets: [{
+      name: 'Example: self-evaluation',
+      questions: [
+        'What outcomes did I achieve against my goals this period, and what was the impact?',
+        'Which engagement had the most impact, and what specifically did I do that made the difference?',
+        'Where could I have performed better, and what does the record show about why?',
+        'What skills or capabilities should I prioritize developing next, based on gaps visible this period?',
+        'What patterns across the period are worth calling out — wins, losses, and what I learned?',
+      ],
+    }],
     custTmpl: DEFAULT_CUST_TMPL,
     execTmpl: DEFAULT_EXEC_TMPL,
     evalTmpl: DEFAULT_EVAL_TMPL,
     trrDigestTmpl: DEFAULT_TRR_DIGEST_TMPL,
     reviewTmpl: DEFAULT_REVIEW_TMPL,
+    reviewMapTmpl: DEFAULT_REVIEW_MAP_TMPL,
   };
 }
 
@@ -443,7 +490,8 @@ const SETTINGS_KEYS = new Set<keyof Settings>([
   'aiEnabled', 'statuses', 'closedStatuses', 'archivedStatus',
   'roles', 'outcomes', 'themes', 'officialTag',
   'model', 'digestModel', 'embedModel',
-  'custTmpl', 'execTmpl', 'evalTmpl', 'trrDigestTmpl', 'reviewTmpl',
+  'ctxTokens', 'fastCtxTokens', 'reviewReserveTokens', 'reviewMaxCalls', 'questionSets',
+  'custTmpl', 'execTmpl', 'evalTmpl', 'trrDigestTmpl', 'reviewTmpl', 'reviewMapTmpl',
 ]);
 
 export function saveSettings(patch: Partial<Settings>): void {

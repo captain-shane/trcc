@@ -110,11 +110,22 @@ export interface Settings {
   model: string;         // fast model: per-note exec summaries
   digestModel: string;   // quality model: digests / reports
   embedModel: string;    // embedding model: semantic search
+  // Context budgeting. These are the windows the SERVER is told to allocate
+  // (Ollama num_ctx). They must match what the model can actually do — set too
+  // high and the server errors or thrashes VRAM; too low and input is dropped.
+  ctxTokens: number;           // usable window of the quality model
+  fastCtxTokens: number;       // usable window of the fast/fallback model
+  reviewReserveTokens: number; // held back per call for scaffolding + the answer
+  reviewMaxCalls: number;      // guard rail: max model calls in one review run
+  // Review forms repeat every cycle (midyear/EoY, year after year), so the
+  // question list is worth saving once rather than retyping each time.
+  questionSets: { name: string; questions: string[] }[];
   custTmpl: string;
   execTmpl: string;
   evalTmpl: string;
   trrDigestTmpl: string;
-  reviewTmpl: string;
+  reviewTmpl: string;    // reduce step: synthesise answers from gathered evidence
+  reviewMapTmpl: string; // map step: pull question-relevant evidence from one slice
 }
 
 export type Rag = 'green' | 'yellow' | 'red';

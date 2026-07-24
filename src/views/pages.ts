@@ -370,7 +370,8 @@ export function digests(stored: StoredDigest[]): string {
 // --- Review (question-driven, scoped, persisted) ----------------------------
 
 import type { ReviewMeta, ReviewRow } from '../db/repo.js';
-import type { ReviewResult } from '../services/review.js';
+import type { ReviewPlan, ReviewResult } from '../services/review.js';
+import type { ReviewJob } from '../services/reviewJob.js';
 
 export function reviewPage(trrs: Trr[], saved: ReviewMeta[], s: Settings): string {
   const sixMonthsAgo = new Date(Date.now() - 182 * 86_400_000).toISOString().slice(0, 10);
@@ -403,6 +404,11 @@ export function reviewPage(trrs: Trr[], saved: ReviewMeta[], s: Settings): strin
   <div class="small muted" style="margin-bottom:10px">Ask up to 10 questions of your engagement record — self-evals, 6-month reviews, retros.
   Scope what the model sees; deterministic facts and the tagged official record anchor every answer. Runs are saved below.</div>
 
+  <!-- Standalone targets so the set controls can sit beside the questions box
+       without nesting forms inside the review form. -->
+  <form id="setsave" method="post" action="/review/sets"></form>
+  <form id="setdel" method="post" action="/review/sets/delete"><input type="hidden" name="name" id="qs-del"></form>
+
   <form class="stack" hx-post="/fragments/review" hx-target="#rv-out" hx-swap="innerHTML" hx-indicator="#rv-ind">
     <div class="card">
       ${field('Questions (one per line, up to 10)', `<textarea name="questions" rows="7" placeholder="What outcomes did I achieve relative to my goals?
@@ -410,6 +416,23 @@ Where could I have improved?
 What could I do better next half?
 Which core value did I best demonstrate, with evidence?
 What should I prioritize learning next?"></textarea>`)}
+      <script type="application/json" id="qsets">${JSON.stringify(s.questionSets).replace(/</g, '\\u003c')}</script>
+      <div class="row wrap" style="gap:8px;align-items:center">
+        <select @change="if($event.target.value!==''){ document.querySelector('textarea[name=questions]').value = JSON.parse(document.getElementById('qsets').textContent)[$event.target.value].questions.join(String.fromCharCode(10)); $event.target.value='' }">
+          <option value="">↓ Load a question set…</option>
+          ${s.questionSets.map((q, i) => `<option value="${i}">${esc(q.name)} (${q.questions.length})</option>`).join('')}
+        </select>
+        <input form="setsave" name="name" placeholder="Save these questions as…" style="max-width:220px" required>
+        <button form="setsave" type="submit" class="btn btn-outline btn-sm"
+          onclick="document.getElementById('qs-hidden').value=document.querySelector('textarea[name=questions]').value">💾 save set</button>
+        <input form="setsave" type="hidden" name="questions" id="qs-hidden">
+      </div>
+      ${s.questionSets.length ? `<div class="row wrap" style="gap:6px;align-items:center">
+        <span class="small muted2">Delete a set:</span>
+        ${s.questionSets.map(q => `<button form="setdel" type="submit" class="btn btn-outline btn-sm" data-n="${esc(q.name)}"
+          onclick="document.getElementById('qs-del').value=this.dataset.n; return confirm('Delete the set &quot;'+this.dataset.n+'&quot;?')">✕ ${esc(q.name)}</button>`).join('')}
+      </div>` : ''}
+      <div class="small muted2">Review forms come round every cycle — save the list once and reload it next time.</div>
       ${field('Output instructions (optional)', `<input name="instructions" placeholder="e.g. formal tone for my manager · bullet points · one paragraph per question">`)}
     </div>
     <div class="card">
@@ -443,16 +466,77 @@ What should I prioritize learning next?"></textarea>`)}
   `);
 }
 
+/**
+ * Reviews are stored as "## Q1. <question>\n\n<answer>" sections joined by ---.
+ * Review forms give you one field per question, so split them back apart and let
+ * each answer be copied on its own.
+ */
+function reviewSections(answers: string): { heading: string; body: string }[] {
+  return answers.split(/\n\n---\n\n/)
+    .map(part => {
+      const m = part.match(/^##\s*(.+?)\n\n([\s\S]*)$/);
+      return m
+        ? { heading: (m[1] ?? '').trim(), body: (m[2] ?? '').trim() }
+        : { heading: '', body: part.trim() };
+    })
+    .filter(s => s.body);
+}
+
+function reviewAnswerBlocks(answers: string): string {
+  const secs = reviewSections(answers);
+  if (!secs.length) return `<div class="ai-text">${md2html(answers)}</div>`;
+  return secs.map((s, i) => `
+    <div class="qa" x-data>
+      <div class="row-between wrap">
+        <strong class="small">${esc(s.heading || `Answer ${i + 1}`)}</strong>
+        <button type="button" class="btn btn-outline btn-sm"
+          @click="navigator.clipboard.writeText($refs.body.innerText).then(()=>{$el.textContent='✓ copied'; setTimeout(()=>$el.textContent='📋 copy answer',1200)})">📋 copy answer</button>
+      </div>
+      <div class="ai-text" x-ref="body">${md2html(s.body)}</div>
+    </div>`).join('');
+}
+
+// A long run polls itself: each response re-renders the whole #rv-out container,
+// so the final poll simply swaps in the result.
+function reviewPoll(jobId: string, inner: string): string {
+  return `
+  <div class="card" hx-get="/fragments/review/job/${esc(jobId)}" hx-trigger="load delay:3s" hx-target="#rv-out" hx-swap="innerHTML">
+    ${inner}
+    <div class="small muted2">Runs on the server — you can leave this page. Finished reviews are saved in the list below.</div>
+  </div>`;
+}
+
+export function reviewStartedFragment(jobId: string, plan: ReviewPlan): string {
+  return reviewPoll(jobId, `
+    <div class="row-between wrap"><strong>Review started…</strong>
+      <span class="small muted2">${plan.trrCount} TRs · ${plan.interactionCount} interactions in scope</span></div>
+    <div class="small muted2">${plan.questions} question${plan.questions === 1 ? '' : 's'} × ${plan.batches} record slice${plan.batches === 1 ? '' : 's'} → at least ${plan.totalCalls} model calls${plan.batches === 1 ? ' (whole scope fits one context window)' : ''}${plan.batches > 1 ? ' — consolidating dense evidence can add a few more' : ''}</div>
+    <div class="progress"><div class="progress-bar" style="width:0%"></div></div>`);
+}
+
+export function reviewProgressFragment(job: ReviewJob): string {
+  const p = job.progress;
+  const pct = p.total > 0 ? Math.min(100, Math.round((p.done / p.total) * 100)) : 0;
+  const secs = Math.round((Date.now() - job.startedAt) / 1000);
+  const mins = secs >= 90 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+  return reviewPoll(job.id, `
+    <div class="row-between wrap"><strong>Running review…</strong>
+      <span class="small muted2">${p.done}/${p.total} calls · ${pct}% · ${mins}</span></div>
+    <div class="progress"><div class="progress-bar" style="width:${pct}%"></div></div>
+    <div class="small muted2">${esc(p.phase)}</div>`);
+}
+
 export function reviewResultFragment(r: ReviewResult): string {
   return `
   <div class="card">
     <div class="row-between wrap">
       <strong>Review result</strong>
-      <span class="small muted2">${r.trrCount} TRRs · ${r.interactionCount} interactions in scope · ${esc(r.model)}</span>
+      <span class="small muted2">${r.trrCount} TRs · ${r.interactionCount} interactions in scope · ${r.batches} slice${r.batches === 1 ? '' : 's'} · ${r.calls} model call${r.calls === 1 ? '' : 's'} · ${esc(r.model)}</span>
     </div>
-    ${r.fellBack ? `<div class="small warn">⚠ digest model hit GPU out-of-memory — generated on the fast model instead</div>` : ''}
-    ${r.truncated ? `<div class="small warn">⚠ engagement detail was truncated to fit the context budget — narrow the scope for full coverage</div>` : ''}
-    <div class="ai-text">${md2html(r.answers)}</div>
+    ${r.fellBack ? `<div class="small warn">⚠ quality model hit GPU out-of-memory — some parts generated on the fast model instead</div>` : ''}
+    ${r.notes.length ? `<div class="small warn">⚠ trimmed to fit the context window: ${esc(r.notes.join(' · '))}</div>` : ''}
+    ${r.truncated && !r.notes.length ? `<div class="small warn">⚠ some evidence exceeded the context window — narrow the scope, or raise the context window in Settings, for full coverage</div>` : ''}
+    ${reviewAnswerBlocks(r.answers)}
     <div class="small muted2">💾 Saved — <a class="hl" href="/review/${r.id}">permalink</a> (also listed below on reload).</div>
   </div>`;
 }
@@ -470,10 +554,10 @@ export function reviewViewPage(r: ReviewRow, scopeSummary: string): string {
     </div>
     ${r.instructions ? `<div class="small muted2">Instructions: ${esc(r.instructions)}</div>` : ''}
     <hr>
-    <div class="ai-text" x-data>
+    <div x-data>
       <div class="row-between"><span class="field-label">Answers</span>
-        <button class="btn btn-outline btn-sm" @click="navigator.clipboard.writeText($refs.a.innerText).then(()=>{$el.textContent='✓ copied'; setTimeout(()=>$el.textContent='📋 copy',1200)})">📋 copy</button></div>
-      <div x-ref="a">${md2html(r.answers)}</div>
+        <button class="btn btn-outline btn-sm" @click="navigator.clipboard.writeText($refs.all.innerText).then(()=>{$el.textContent='✓ copied'; setTimeout(()=>$el.textContent='📋 copy all',1200)})">📋 copy all</button></div>
+      <div x-ref="all">${reviewAnswerBlocks(r.answers)}</div>
     </div>
   </div>
   `);
@@ -562,6 +646,9 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
     field(`${label} (one per line)`, `<textarea name="${name}" rows="${rows}" class="mono">${esc(values.join('\n'))}</textarea>`);
   return page('Settings', '/settings', `
   <h2>Settings</h2>
+  <!-- Standalone target so the reset button can live inside the settings form
+       without nesting one form in another. -->
+  <form id="tmplreset" method="post" action="/settings/templates/reset"></form>
   <form method="post" action="/settings" class="stack">
     <div class="card ${s.aiEnabled ? '' : 'banner'}">
       <h3>AI — local only</h3>
@@ -576,6 +663,13 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
         ${field('Note model (fast — exec summaries)', modelSelect('model', s.model))}
         ${field('Digest model (quality — reports)', modelSelect('digestModel', s.digestModel))}
         ${field('Embedding model (semantic search)', modelSelect('embedModel', s.embedModel))}
+      </div>
+      <div class="small muted" style="margin-top:10px"><strong>Context budget</strong> — the window the server is told to allocate (Ollama <code>num_ctx</code>). Ollama does <em>not</em> size this to your prompt: set it too low and input is silently dropped; too high and it errors or thrashes VRAM. Reviews slice the record to fit whatever you set here, so bigger is not automatically better — it just means fewer slices.</div>
+      <div class="grid2">
+        ${field('Quality model context (tokens)', `<input type="number" name="ctxTokens" value="${s.ctxTokens}" min="1024" step="1024">`)}
+        ${field('Fast / fallback model context (tokens)', `<input type="number" name="fastCtxTokens" value="${s.fastCtxTokens}" min="1024" step="1024">`)}
+        ${field('Reserved for answer + scaffolding (tokens)', `<input type="number" name="reviewReserveTokens" value="${s.reviewReserveTokens}" min="200" step="100">`)}
+        ${field('Max model calls per review run', `<input type="number" name="reviewMaxCalls" value="${s.reviewMaxCalls}" min="1">`)}
       </div>
     </div>
     <div class="card">
@@ -607,13 +701,20 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
       <div class="small muted2">Auto-backfill drains the exec-summary backlog in the background on this schedule (also runs shortly after startup).</div>
     </div>
     <div class="card">
-      <h3>Prompt templates</h3>
+      <div class="row-between wrap">
+        <h3 style="margin:0">Prompt templates</h3>
+        <button form="tmplreset" type="submit" class="btn btn-outline btn-sm"
+          onclick="return confirm('Reset all prompt templates to the shipped defaults? Any edits you made will be lost.')">↺ reset to defaults</button>
+      </div>
+      <div class="small muted2">Saved templates override the shipped defaults permanently — so an improved default in a later version will not reach you until you reset.</div>
       <div class="small muted">Variables: {{customer}} {{project}} {{title}} {{status}} {{contact}} {{rep}} {{date}} {{notes}} {{description}} {{interactions}} {{facts}} {{official}} {{myRole}} {{valueTheme}} {{complexity}} {{priority}}</div>
       ${field('Customer-facing (per note)', `<textarea name="custTmpl" rows="8" class="mono">${esc(s.custTmpl)}</textarea>`)}
       ${field('Exec summary (per note)', `<textarea name="execTmpl" rows="8" class="mono">${esc(s.execTmpl)}</textarea>`)}
       ${field('Period self-eval (digest)', `<textarea name="evalTmpl" rows="8" class="mono">${esc(s.evalTmpl)}</textarea>`)}
       ${field('Per-TRR catch-up (digest)', `<textarea name="trrDigestTmpl" rows="8" class="mono">${esc(s.trrDigestTmpl)}</textarea>`)}
-      ${field('Review engine ({{questions}} {{facts}} {{official}} {{engagements}} {{instructions}})', `<textarea name="reviewTmpl" rows="8" class="mono">${esc(s.reviewTmpl)}</textarea>`)}
+      <div class="small muted" style="margin-top:6px">The review engine runs in two stages: <strong>map</strong> pulls question-relevant evidence out of each record slice, then <strong>reduce</strong> writes the answer from everything gathered.</div>
+      ${field('Review — reduce / synthesis ({{questions}} {{facts}} {{official}} {{findings}} {{instructions}})', `<textarea name="reviewTmpl" rows="8" class="mono">${esc(s.reviewTmpl)}</textarea>`)}
+      ${field('Review — map / per-slice extraction ({{question}} {{slice}} {{engagements}})', `<textarea name="reviewMapTmpl" rows="8" class="mono">${esc(s.reviewMapTmpl)}</textarea>`)}
     </div>
     <div class="row">
       <button class="btn" type="submit">Save settings</button>

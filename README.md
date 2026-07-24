@@ -108,6 +108,63 @@ model your hardware fits for digests/reviews, and any embedding model.
 LM Studio and friends are first-class via the OpenAI-compatible API.
 
 
+### Context windows & scale
+
+The single most important setting, and the least obvious: **Ollama does not size
+the context window to your prompt.** Without an explicit `num_ctx` it uses the
+model's built-in default — often 2–4k tokens — and *silently discards* whatever
+doesn't fit. The request still succeeds; you just get an answer based on a
+fraction of what you sent. This app always sends `num_ctx` explicitly, taken from
+**Settings → Context budget**, so set it to something your models can actually hold.
+
+| Setting | What it does |
+|---|---|
+| Quality model context | Window requested for digests/reviews (`num_ctx`) |
+| Fast / fallback model context | Same, for the smaller model used on OOM fallback |
+| Reserved for answer + scaffolding | Held back per call for the prompt and the reply |
+| Max model calls per review run | Guard rail — an oversized run is refused, not silently started |
+
+To raise the ceiling in Ollama, bake a window into a model variant (this is
+exactly what a `-16k` / `-128k` style tag is):
+
+```bash
+printf 'FROM gemma4:26b\nPARAMETER num_ctx 32768\n' > Modelfile
+ollama create gemma4-32k -f Modelfile
+```
+
+…or point Settings at a long-context model you already have and set the token
+count to match.
+
+**But a bigger window is not the scaling strategy.** VRAM cost grows with
+context — a very large window can cost more memory than the weights — and long
+prompts get slower and less accurate ("lost in the middle"). So the review
+engine **chunks instead**:
+
+- Records are packed into slices sized to your configured window.
+- Each question is **mapped** over every slice to pull only relevant evidence.
+- Those findings are **reduced** into one answer per question (consolidating in
+  rounds if the evidence itself overflows).
+- Deterministic stats — counts, win/loss, per-status totals — are computed in
+  code and passed whole, so **no number is ever lost to slicing**.
+
+Volume is therefore bounded by *time*, not by context size: 10× the records is
+10× the slices, not an impossible prompt. A bigger window just means fewer
+slices and a faster run. If the whole scope happens to fit one window, the map
+pass is skipped and it's a single call per question.
+
+Before each run the UI shows the plan — records in scope, slices, and total model
+calls — and the run executes in the background with live progress, because a
+large sweep is minutes-to-hours, not seconds.
+
+**Rules of thumb**
+
+- Start at 16k; raise only when you have VRAM headroom to spare.
+- Fewer, larger slices = fewer calls = faster — until VRAM or answer quality suffers.
+- Narrowing scope (date range, TR numbers, role, theme) beats brute force every time.
+- A run refused for exceeding the call budget is the guard rail working. Narrow
+  the scope, or raise the limit deliberately.
+
+
 ## Make it yours — Settings as the use-case dial
 
 "Technical Request" deliberately means whatever you need it to mean. The

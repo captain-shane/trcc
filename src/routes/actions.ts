@@ -3,7 +3,8 @@ import * as repo from '../db/repo.js';
 import * as views from '../views/pages.js';
 import { interactionCard, digestBlock, errorBox } from '../views/components.js';
 import { enrichExecSummaries, periodDigest, queueArchivalDigest, trrDigest } from '../services/digest.js';
-import { runReview } from '../services/review.js';
+import { planReview } from '../services/review.js';
+import { getReviewJob, startReview } from '../services/reviewJob.js';
 import { fillTemplate, generate } from '../services/ai.js';
 import { semanticSearch, textSearch } from '../services/search.js';
 import {
@@ -266,11 +267,61 @@ actions.post('/fragments/review', async (req, res) => {
     trrIds: [...new Set([...formList(b.trrIds), ...idsFromNums])].slice(0, 500),
   };
   try {
-    const result = await runReview(questions, scope, str(b.instructions, 2_000));
-    res.send(views.reviewResultFragment(result));
+    // Pre-flight: know the cost before committing to it.
+    const plan = planReview(questions, scope);
+    if (plan.overCallBudget) {
+      return res.send(errorBox(
+        `This run needs ${plan.totalCalls} model calls (${plan.questions} questions × ${plan.batches} record slices), ` +
+        `over the limit of ${plan.maxCalls}. Narrow the scope, ask fewer questions, raise the context window in ` +
+        `Settings so fewer slices are needed, or raise the call limit.`));
+    }
+    const jobId = startReview(questions, scope, str(b.instructions, 2_000), plan.totalCalls);
+    res.send(views.reviewStartedFragment(jobId, plan));
   } catch (e) {
     res.send(errorBox(`Review failed: ${(e as Error).message}`));
   }
+});
+
+// Progress poll for a running review (the fragment re-renders itself until done).
+actions.get('/fragments/review/job/:id', (req, res) => {
+  const job = getReviewJob(String(req.params.id));
+  if (!job) {
+    return res.send(errorBox(
+      'That review run is no longer tracked (the server may have restarted). Any review that finished is saved in the list below.'));
+  }
+  if (job.status === 'error') return res.send(errorBox(`Review failed: ${job.error ?? 'unknown error'}`));
+  if (job.status === 'done' && job.result) return res.send(views.reviewResultFragment(job.result));
+  res.send(views.reviewProgressFragment(job));
+});
+
+// Settings are stored as an overlay on the shipped defaults, so once a template
+// has been saved it shadows the default forever — an improved default in a later
+// version silently never applies. Make restoring them one click.
+actions.post('/settings/templates/reset', (_req, res) => {
+  const d = repo.defaultSettings();
+  repo.saveSettings({
+    custTmpl: d.custTmpl, execTmpl: d.execTmpl, evalTmpl: d.evalTmpl,
+    trrDigestTmpl: d.trrDigestTmpl, reviewTmpl: d.reviewTmpl, reviewMapTmpl: d.reviewMapTmpl,
+  });
+  res.redirect(303, '/settings');
+});
+
+// Saved question sets — the same review form comes round every cycle.
+actions.post('/review/sets', (req, res) => {
+  const b = req.body as Record<string, unknown>;
+  const name = str(b.name, 80).trim();
+  const questions = str(b.questions, 5_000).split('\n').map(q => q.trim()).filter(Boolean).slice(0, 10);
+  if (name && questions.length) {
+    const others = repo.getSettings().questionSets.filter(q => q.name !== name); // re-saving replaces
+    repo.saveSettings({ questionSets: [...others, { name, questions }].slice(0, 25) });
+  }
+  res.redirect(303, '/review');
+});
+
+actions.post('/review/sets/delete', (req, res) => {
+  const name = str((req.body as Record<string, unknown>).name, 80);
+  repo.saveSettings({ questionSets: repo.getSettings().questionSets.filter(q => q.name !== name) });
+  res.redirect(303, '/review');
 });
 
 actions.post('/review/:id/delete', (req, res) => {
@@ -380,10 +431,16 @@ actions.post('/settings', (req, res) => {
     model: str(b.model, 200) || cur.model,
     digestModel: str(b.digestModel, 200) || cur.digestModel,
     embedModel: str(b.embedModel, 200) || cur.embedModel,
+    ctxTokens: num(b.ctxTokens, cur.ctxTokens, 1_024),
+    fastCtxTokens: num(b.fastCtxTokens, cur.fastCtxTokens, 1_024),
+    reviewReserveTokens: num(b.reviewReserveTokens, cur.reviewReserveTokens, 200),
+    reviewMaxCalls: num(b.reviewMaxCalls, cur.reviewMaxCalls),
     custTmpl: str(b.custTmpl, 50_000) || cur.custTmpl,
     execTmpl: str(b.execTmpl, 50_000) || cur.execTmpl,
     evalTmpl: str(b.evalTmpl, 50_000) || cur.evalTmpl,
     trrDigestTmpl: str(b.trrDigestTmpl, 50_000) || cur.trrDigestTmpl,
+    reviewTmpl: str(b.reviewTmpl, 50_000) || cur.reviewTmpl,
+    reviewMapTmpl: str(b.reviewMapTmpl, 50_000) || cur.reviewMapTmpl,
   });
   res.redirect(303, '/settings');
 });
