@@ -1,6 +1,6 @@
 import type { Interaction, Settings, StoredDigest, Trr } from '../types.js';
 import { COMPLEXITIES, INTERACTION_TYPES, PRIORITIES, daysSince, rag } from '../types.js';
-import { RAG_COLOR, RAG_LABEL, badge, esc, md2html, priorityBadge, statusBadge } from './html.js';
+import { RAG_COLOR, RAG_LABEL, badge, esc, md2html, priorityBadge, ragDot, statusBadge } from './html.js';
 
 export function archiveCountdown(t: Trr, s: Settings): string {
   if (!t.deactivated || !t.deactivatedAt) return '';
@@ -20,7 +20,7 @@ export function trrCard(t: Trr, ints: Interaction[], s: Settings): string {
      data-txt="${esc(txt)}" x-show="!q || $el.dataset.txt.includes(q.toLowerCase())">
     <div class="trr-card-main">
       <div class="trr-card-head">
-        <span class="dot" style="background:${RAG_COLOR[r]}"></span>
+        ${ragDot(r, t, s)}
         <span class="trr-num">#${t.num}</span>
         <strong>${esc(t.customer)}</strong>
         ${badge(t.complexity, 'cx')}

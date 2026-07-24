@@ -2,7 +2,7 @@ import type { Interaction, Settings, StoredDigest, Trr, TrrHistoryEntry } from '
 import { COMPLEXITIES, PRIORITIES, daysSince, rag } from '../types.js';
 import type { PeriodDigest } from '../services/digest.js';
 import type { SearchHit } from '../services/search.js';
-import { RAG_COLOR, RAG_LABEL, esc, md2html, page, priorityBadge, statusBadge, badge } from './html.js';
+import { RAG_COLOR, RAG_LABEL, RAG_SYMBOL, esc, md2html, page, priorityBadge, ragDot, statusBadge, badge } from './html.js';
 import {
   archiveCountdown, digestBlock, field, hbar, interactionCard, interactionForm,
   statTile, trrCard, trrForm,
@@ -55,9 +55,9 @@ export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: str
 
   return page('Dashboard', '/', `
   <div class="tiles">
-    ${tile('red', 'Stalled', ct.red, 'var(--red)')}
-    ${tile('yellow', 'Aging', ct.yellow, 'var(--yellow)')}
-    ${tile('green', 'Active', ct.green, 'var(--green)')}
+    ${tile('red', `${RAG_SYMBOL.red} Stalled`, ct.red, 'var(--red)')}
+    ${tile('yellow', `${RAG_SYMBOL.yellow} Aging`, ct.yellow, 'var(--yellow)')}
+    ${tile('green', `${RAG_SYMBOL.green} Active`, ct.green, 'var(--green)')}
     ${tile('deact', 'Deactivated', deact, 'var(--muted2)')}
     ${tile('all', 'Total', trrs.length, 'var(--text)')}
   </div>
@@ -103,10 +103,10 @@ export function trrDetail(t: Trr, ints: Interaction[], s: Settings, digest: Stor
     <div class="row-between wrap">
       <div>
         <div class="row">
-          <span class="dot" style="background:${RAG_COLOR[r]}"></span>
+          ${ragDot(r, t, s)}
           <span class="trr-num">#${t.num}</span>
           <strong class="lg">${esc(t.customer)}</strong>
-          ${badge(RAG_LABEL[r], `rag-b-${r}`)}
+          ${badge(`${RAG_SYMBOL[r]} ${RAG_LABEL[r]}`, `rag-b-${r}`)}
           ${statusBadge(t.status)}
           ${priorityBadge(t.priority)}
         </div>
