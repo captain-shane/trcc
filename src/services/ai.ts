@@ -61,13 +61,26 @@ async function post<T>(path: string, body: unknown, timeoutMs: number): Promise<
   return res.json() as Promise<T>;
 }
 
-/** Run a prompt on the local model. Long timeout: big models are slow. */
-export async function generate(prompt: string, model: string, timeoutMs = 180_000): Promise<string> {
+/**
+ * Run a prompt on the local model. Long timeout: big models are slow.
+ *
+ * numCtx matters more than it looks: Ollama does NOT size the context window to
+ * the prompt. Without an explicit options.num_ctx it uses the model's built-in
+ * default (often 2k-4k tokens) and SILENTLY DROPS everything past it — the call
+ * still succeeds, it just answers from a fraction of what you sent. Always pass
+ * the window you actually intend to use.
+ */
+export async function generate(prompt: string, model: string, timeoutMs = 180_000, numCtx?: number): Promise<string> {
   const style = await detectStyle();
   if (style === 'ollama') {
-    const data = await post<{ response?: string }>('/api/generate', { model, prompt, stream: false }, timeoutMs);
+    const body: Record<string, unknown> = { model, prompt, stream: false };
+    if (numCtx && numCtx > 0) body.options = { num_ctx: numCtx };
+    const data = await post<{ response?: string }>('/api/generate', body, timeoutMs);
     return (data.response ?? '').trim();
   }
+  // OpenAI-compatible servers (LM Studio, vLLM, llama.cpp) fix the context
+  // window when the model is loaded — there is no per-request equivalent, so
+  // numCtx is advisory only here and the server config has to match.
   const data = await post<{ choices?: { message?: { content?: string } }[] }>(
     '/v1/chat/completions',
     { model, messages: [{ role: 'user', content: prompt }], stream: false },
@@ -136,18 +149,23 @@ export interface GenResult {
  * on an out-of-memory error, wait for the server to free what it can and
  * retry once, then fall back to the smaller model rather than failing.
  */
-export async function generateWithFallback(prompt: string, preferred: string, fallback: string, timeoutMs = 180_000): Promise<GenResult> {
+export async function generateWithFallback(
+  prompt: string, preferred: string, fallback: string, timeoutMs = 180_000,
+  numCtx?: number, fallbackNumCtx?: number,
+): Promise<GenResult> {
   try {
-    return { text: await generate(prompt, preferred, timeoutMs), model: preferred, fellBack: false };
+    return { text: await generate(prompt, preferred, timeoutMs, numCtx), model: preferred, fellBack: false };
   } catch (e1) {
     if (!isOom(e1)) throw e1;
     await sleep(4_000); // give the server a moment to evict idle models
     try {
-      return { text: await generate(prompt, preferred, timeoutMs), model: preferred, fellBack: false };
+      return { text: await generate(prompt, preferred, timeoutMs, numCtx), model: preferred, fellBack: false };
     } catch (e2) {
       if (!isOom(e2) || !fallback || fallback === preferred) throw e2;
+      // The fallback is a smaller model — it usually has a smaller window too,
+      // so honour its own limit rather than reusing the quality model's.
       console.warn(`GPU OOM on ${preferred}; falling back to ${fallback}`);
-      return { text: await generate(prompt, fallback, timeoutMs), model: fallback, fellBack: true };
+      return { text: await generate(prompt, fallback, timeoutMs, fallbackNumCtx ?? numCtx), model: fallback, fellBack: true };
     }
   }
 }

@@ -260,3 +260,23 @@ details[open] > summary { margin-bottom: 8px; }
   .meta-grid { grid-template-columns: repeat(2, 1fr); }
   .trr-grid, .digest-grid { grid-template-columns: 1fr; }
 }
+
+/* Review run progress (long map-reduce jobs poll themselves) */
+.progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg2, #1b1f27);
+  border: 1px solid var(--line, #2a3039);
+  overflow: hidden;
+  margin: 8px 0 6px;
+}
+.progress-bar {
+  height: 100%;
+  background: var(--accent, #4c8dff);
+  border-radius: 999px;
+  transition: width .4s ease;
+}
+
+/* Per-question answer blocks — review forms take one field per question */
+.qa { border-top: 1px solid var(--line, #2a3039); padding-top: 10px; margin-top: 10px; }
+.qa:first-of-type { border-top: 0; padding-top: 0; margin-top: 4px; }

@@ -153,6 +153,56 @@ describe('review scoping', () => {
   });
 });
 
+describe('review batching (map-reduce planning)', () => {
+  it('derives slices from the configured window and keeps the call math honest', async () => {
+    const { planReview, buildContext } = await import('../src/services/review.js');
+    const before = repo.getSettings();
+    try {
+      repo.saveSettings({ ctxTokens: 1_500, reviewReserveTokens: 200 });
+      const plan = planReview(['q1', 'q2'], {});
+      const ctx = buildContext({});
+      expect(plan.trrCount).toBe(ctx.trrCount); // same scope either way
+      if (plan.corpusChars > plan.batchBudgetChars) {
+        expect(plan.batches).toBeGreaterThan(1);
+        expect(plan.mapCalls).toBe(plan.questions * plan.batches);
+      } else {
+        expect(plan.batches).toBe(1);
+        expect(plan.mapCalls).toBe(0);
+      }
+      expect(plan.totalCalls).toBe(plan.mapCalls + plan.reduceCalls);
+    } finally {
+      repo.saveSettings({ ctxTokens: before.ctxTokens, reviewReserveTokens: before.reviewReserveTokens });
+    }
+  });
+
+  it('skips the map pass when the whole scope fits one window', async () => {
+    const { planReview } = await import('../src/services/review.js');
+    const before = repo.getSettings();
+    try {
+      repo.saveSettings({ ctxTokens: 200_000, reviewReserveTokens: 2_000 });
+      const plan = planReview(['q1', 'q2'], {});
+      expect(plan.batches).toBe(1);
+      expect(plan.mapCalls).toBe(0);
+      expect(plan.totalCalls).toBe(2); // one reduce per question, nothing else
+    } finally {
+      repo.saveSettings({ ctxTokens: before.ctxTokens, reviewReserveTokens: before.reviewReserveTokens });
+    }
+  });
+
+  it('flags a run that would blow the call budget instead of silently running it', async () => {
+    const { planReview } = await import('../src/services/review.js');
+    const before = repo.getSettings();
+    try {
+      repo.saveSettings({ reviewMaxCalls: 1 });
+      const plan = planReview(['a', 'b', 'c'], {});
+      expect(plan.totalCalls).toBeGreaterThan(1);
+      expect(plan.overCallBudget).toBe(true);
+    } finally {
+      repo.saveSettings({ reviewMaxCalls: before.reviewMaxCalls });
+    }
+  });
+});
+
 describe('text search', () => {
   it('finds seeded notes via FTS', () => {
     const hits = textSearch('failover');
