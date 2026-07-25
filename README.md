@@ -193,6 +193,10 @@ are yours to tune.
 
 ## Backups & restore
 
+> **Upgrading an existing deployment?** See [UPGRADE.md](UPGRADE.md) — your data
+> lives on the `trr-data` volume, so rebuilds are safe as long as you never
+> delete that volume. Back up first, then `git pull` + `docker compose up -d --build`.
+
 **Settings → Backups & restore** manages full-fidelity snapshots of the
 SQLite database (every TR, note, digest, report, review, setting, and
 search index — made with `VACUUM INTO`, safe while running):
