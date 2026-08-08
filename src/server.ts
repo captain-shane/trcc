@@ -1,7 +1,7 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { config } from './config.js';
+import { config, APP_VERSION } from './config.js';
 import './db/index.js';                    // opens DB + runs migrations
 import { seedIfEmpty } from './db/seed.js';
 import { counts, getSettings } from './db/repo.js';
@@ -27,7 +27,7 @@ app.use('/vendor', express.static(join(__dirname, '..', 'public', 'vendor'), { m
 app.use('/css', express.static(join(__dirname, '..', 'public', 'css')));
 
 app.get('/healthz', (_req, res) => {
-  res.json({ ok: true, version: '2.0.0', ...counts() });
+  res.json({ ok: true, version: APP_VERSION, ...counts() });
 });
 
 app.use('/api', api);

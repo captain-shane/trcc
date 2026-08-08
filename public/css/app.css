@@ -297,3 +297,19 @@ details[open] > summary { margin-bottom: 8px; }
 .rag-g-green  { color: var(--green); }
 .rag-g-yellow { color: var(--yellow); }
 .rag-g-red    { color: var(--red); }
+
+/* Build identity. /healthz reports the same value, so a user and an operator
+   can confirm they are looking at the same build before comparing notes. */
+.app-footer{
+  max-width:var(--container,1200px);
+  margin:32px auto 16px;
+  padding:12px 16px 0;
+  border-top:1px solid var(--line,#e5e5e5);
+  text-align:right;
+}
+.app-version{
+  font-size:11.5px;
+  letter-spacing:.03em;
+  color:var(--muted,#777);
+  opacity:.8;
+}

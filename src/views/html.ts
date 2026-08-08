@@ -1,3 +1,4 @@
+import { APP_VERSION } from '../config.js';
 import type { Rag, Settings, Trr } from '../types.js';
 import { daysSince } from '../types.js';
 
@@ -94,6 +95,9 @@ export function page(title: string, active: string, content: string): string {
 <main class="container">
 ${content}
 </main>
+<footer class="app-footer">
+  <span class="app-version" title="TR Command Center version — quote this when reporting a problem">TR Command Center v${APP_VERSION}</span>
+</footer>
 </body>
 </html>`;
 }
