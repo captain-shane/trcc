@@ -20,3 +20,19 @@ export const config = {
   defaultDigestModel: process.env.AI_DIGEST_MODEL ?? 'gemma4:26b',
   defaultEmbedModel: process.env.AI_EMBED_MODEL ?? 'nomic-embed-text',
 } as const;
+
+// Single source of truth for the build identity: package.json. /healthz used to
+// carry a hardcoded '2.0.0' string that went stale the moment the version moved,
+// which is precisely the failure this is meant to prevent.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const _pkgDir = dirname(fileURLToPath(import.meta.url));
+export const APP_VERSION: string = (() => {
+  try {
+    return JSON.parse(readFileSync(join(_pkgDir, '..', 'package.json'), 'utf8')).version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();

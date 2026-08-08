@@ -10,6 +10,19 @@ that a user can observe are **minor**, not patch.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-08
+
+### Added
+- **The version is now visible in the app.** A footer on every page shows the build,
+  and `/healthz` reports the same value — so a user and an operator can confirm they
+  are looking at the same build before comparing notes.
+
+### Fixed
+- **`/healthz` reported a hardcoded `2.0.0`.** It was a string literal in `server.ts`,
+  so it went stale the moment `package.json` moved and would have kept reporting 2.0.0
+  forever. Version is now read from `package.json` at startup as the single source.
+
+
 ## [2.1.0] - 2026-08-08
 
 ### Added
