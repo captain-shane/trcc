@@ -41,9 +41,14 @@ Settings afterwards anyway.
   opportunity. One log can apply to several TRs (a call covering three child
   requests is recorded once and shows on all three)
 - **Dashboard** — Green/Yellow/Red health per TR from last-contact age, grouped
-  as families (a parent is green while any child is active), by customer,
-  or flat; short `#N` handles and TR IDs, instant filter box, deactivation with
-  archive countdown
+  as families (a parent is green while any child is active), a customer grid,
+  a collapsible customer → opportunity → parent → child tree, or Requests (the
+  child and standalone TRs only); short `#N` handles and TR IDs, instant filter
+  box, deactivation with archive countdown
+- **Import** — paste rows from Google Sheets / CSV (or free text, read by the
+  local model); columns are mapped for you and editable, the preview shows
+  every TR, log, customer and opportunity before anything is saved, a repeat
+  paste only adds what is new, and an applied import can be undone
 - **Accounts** — the customer → opportunity → TR tree, with rename/merge for
   duplicate customer names and per-level pages
 - **Update Desk** — every TR ID owes an update each cycle (default: every
