@@ -392,3 +392,39 @@ details[open] > summary { margin-bottom: 8px; }
 .desk-cust { border-bottom: 1px solid var(--c2); padding-bottom: 4px; }
 .desk-parent { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0 4px; font-size: 12.5px; color: var(--muted); }
 .tile-value.ds-overdue, .tile-value.ds-due, .tile-value.ds-draft, .tile-value.ds-posted, .tile-value.ds-notdue { font-weight: 700; }
+
+/* Dashboard by customer — grid tiles and collapsible tree */
+.cust-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 10px; align-items: start; }
+.cust-tile { margin: 0; border-left: 4px solid var(--c3); display: flex; flex-direction: column; gap: 2px; }
+.edge-red { border-left-color: var(--red) !important; }
+.edge-yellow { border-left-color: var(--yellow) !important; }
+.edge-green { border-left-color: var(--green) !important; }
+.cust-tile-head { gap: 8px; }
+.tally { display: inline-flex; gap: 8px; font-size: 12px; font-weight: 600; }
+.add-tr { border: 1px dashed var(--c3); border-radius: 6px; padding: 1px 7px; }
+.add-tr:hover { color: var(--text); border-color: var(--muted2); }
+.cust-tree { padding: 8px 10px; }
+.tree-tools { padding: 2px 4px 8px; border-bottom: 1px solid var(--c2); margin-bottom: 4px; }
+.tnode > summary { list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 6px; border-radius: 6px; }
+.tnode > summary::-webkit-details-marker { display: none; }
+.tnode > summary:hover { background: var(--c2); }
+.tcaret::before { content: '▸'; display: inline-block; width: 10px; color: var(--muted2); transition: transform .12s; }
+.tnode[open] > summary .tcaret::before { transform: rotate(90deg); }
+.tspacer { flex: 1; }
+.tnode-cust { border-left: 3px solid var(--c3); margin: 4px 0; padding-left: 4px; }
+.tnode-cust > summary strong { font-size: 14px; color: var(--text); }
+.tnode-opp { margin-left: 18px; font-size: 13px; }
+.tnone-head { padding: 6px 6px 2px 16px; }
+.tnode-none:only-of-type { padding-top: 2px; }
+.tleaves { margin-left: 16px; border-left: 1px dashed var(--c3); padding-left: 6px; }
+.dash-last { flex: 0 1 280px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-logs { flex-shrink: 0; width: 46px; text-align: right; }
+@media (max-width: 900px) { .dash-last, .dash-logs, .dash-row .badge.role { display: none; } }
+@media (max-width: 520px) { .cust-grid { grid-template-columns: minmax(0, 1fr); } .tnode-opp { margin-left: 8px; } .tleaves { margin-left: 6px; } }
+.tally > span, .add-tr, .tlink, .tcount { white-space: nowrap; }
+.tnode > summary > strong { min-width: 0; }
+@media (max-width: 520px) {
+  .tlink, .tcount, .dash-pri, .tree-tools > .small { display: none; }
+  .tnode > summary { gap: 6px; padding: 6px 2px; }
+  .dash-row .badge.st-plain { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+}

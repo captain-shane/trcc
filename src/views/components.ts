@@ -36,6 +36,7 @@ export interface CardCtx {
   children?: Trr[];      // this TR's children (it is a parent)
   child?: boolean;       // render as a nested child card
   showCustomer?: boolean;
+  parent?: Trr;          // shown as a 'part of' line (Requests view)
 }
 
 export function trrCard(t: Trr, ints: Interaction[], s: Settings, ctx: CardCtx = {}): string {
@@ -62,6 +63,7 @@ export function trrCard(t: Trr, ints: Interaction[], s: Settings, ctx: CardCtx =
       </div>
       <div class="${ctx.child ? 'child-title' : 'muted'}">${esc(t.title)}</div>
       ${ctx.opp && !ctx.child ? `<div class="small muted2">◇ ${esc(ctx.opp)}</div>` : ''}
+      ${ctx.parent ? `<div class="small muted2">↑ part of #${ctx.parent.num}${ctx.parent.externalId ? ` ${esc(ctx.parent.externalId)}` : ''} · ${esc(ctx.parent.title)}</div>` : ''}
       ${kids.length ? `<div class="small family-line">⬚ ${kids.length} child TR${kids.length === 1 ? '' : 's'} · ${openKids.length} open${t.activityVia ? ` · latest activity on #${t.activityVia}` : ''}${stalledKids ? ` · <span class="rag-g-red">${RAG_SYMBOL.red}</span> ${stalledKids} stalled` : ''}</div>` : ''}
       ${t.valueThemes.length && !ctx.child ? `<div class="theme-row">${t.valueThemes.map(v => badge(v, 'theme')).join('')}</div>` : ''}
       ${last ? `<div class="small muted2">Last: ${esc(last.type)} · ${esc(last.date)} · ${esc(last.note.slice(0, 70))}${last.note.length > 70 ? '…' : ''}</div>` : ''}

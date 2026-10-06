@@ -1,5 +1,5 @@
 import type { Customer, Interaction, Opportunity, ScopeSummary, Settings, StoredDigest, Trr, TrrHistoryEntry } from '../types.js';
-import { COMPLEXITIES, PRIORITIES, daysSince, rag } from '../types.js';
+import { COMPLEXITIES, PRIORITIES, daysSince, rag, type Rag } from '../types.js';
 import type { Desk, DeskRow } from '../services/updates.js';
 import { WEEKDAYS, addDays, daysBetween, localDay, shortDay } from '../services/cycle.js';
 import type { PeriodDigest } from '../services/digest.js';
@@ -32,12 +32,170 @@ function backlogBanner(backlog: number, aiEnabled: boolean): string {
 }
 
 export interface DashCtx {
-  group: 'family' | 'customer' | 'flat';
+  group: 'family' | 'grid' | 'tree' | 'flat';
   opps: Map<string, Opportunity>;
   customers: Map<string, Customer>;
   kids: Map<string, Trr[]>;       // parentId -> children (all active TRs)
   updatesDue: number;              // due + overdue on the current cycle
   cycleDue: string;
+}
+
+// --- Dashboard by customer: grid of account tiles, or a collapsible tree ------
+
+interface CustGroup {
+  key: string;
+  name: string;
+  customer: Customer | undefined;
+  trrs: Trr[];
+  worst: Rag | null;
+  tally: Record<Rag, number>;
+  latest: string;                       // most recent lastContact across the group
+}
+
+const RAG_ORDER: Record<Rag, number> = { red: 0, yellow: 1, green: 2 };
+
+function tallyOf(list: Trr[], s: Settings): Record<Rag, number> {
+  const t = { red: 0, yellow: 0, green: 0 };
+  for (const x of list) if (!x.deactivated && !s.closedStatuses.includes(x.status)) t[rag(x.lastContact, s)]++;
+  return t;
+}
+
+/** Health counts as shape + number, zeros left out. */
+function tallyHtml(t: Record<Rag, number>): string {
+  const parts = (['red', 'yellow', 'green'] as Rag[]).filter(r => t[r])
+    .map(r => `<span class="rag-g-${r}" title="${esc(RAG_LABEL[r])}">${RAG_SYMBOL[r]} ${t[r]}</span>`);
+  return parts.length ? `<span class="tally">${parts.join('')}</span>` : '';
+}
+
+/** Customers ordered worst-health first, then by name. */
+function customerGroups(list: Trr[], ctx: DashCtx, s: Settings): CustGroup[] {
+  const m = new Map<string, Trr[]>();
+  for (const t of list) {
+    const k = t.customerId || t.customer;
+    if (!m.has(k)) m.set(k, []);
+    m.get(k)!.push(t);
+  }
+  return [...m.entries()].map(([key, trrs]) => {
+    const worst = worstRag(trrs, s);
+    return {
+      key, name: trrs[0]!.customer, customer: ctx.customers.get(key), trrs, worst,
+      tally: tallyOf(trrs, s),
+      latest: trrs.reduce((a, t) => (t.lastContact > a ? t.lastContact : a), ''),
+    };
+  }).sort((a, b) =>
+    (a.worst ? RAG_ORDER[a.worst] : 3) - (b.worst ? RAG_ORDER[b.worst] : 3) || a.name.localeCompare(b.name));
+}
+
+/** A customer's TRs split by opportunity (in opportunity order), then the unassigned. */
+function byOpportunity(g: CustGroup, ctx: DashCtx): { opp: Opportunity | null; trrs: Trr[] }[] {
+  const out: { opp: Opportunity | null; trrs: Trr[] }[] = [];
+  const seen = new Set<string>();
+  for (const t of g.trrs) {
+    if (!t.opportunityId || seen.has(t.opportunityId)) continue;
+    seen.add(t.opportunityId);
+    const opp = ctx.opps.get(t.opportunityId) ?? null;
+    out.push({ opp, trrs: g.trrs.filter(x => x.opportunityId === t.opportunityId) });
+  }
+  out.sort((a, b) => (a.opp?.name ?? '').localeCompare(b.opp?.name ?? ''));
+  const un = g.trrs.filter(t => !t.opportunityId);
+  if (un.length) out.push({ opp: null, trrs: un });
+  return out;
+}
+
+function groupTxt(g: CustGroup, ctx: DashCtx): string {
+  return esc(`${g.name} ${g.trrs.map(t => `#${t.num} ${t.externalId} ${t.title} ${t.status} ${t.opportunityId ? ctx.opps.get(t.opportunityId)?.name ?? '' : ''}`).join(' ')}`.toLowerCase());
+}
+
+/** One TR as a compact row; `wide` adds priority, role, log count and the last note. */
+function dashRow(t: Trr, child: boolean, ints: IntsByTrr, s: Settings, wide: boolean): string {
+  const r = rag(t.lastContact, s);
+  const its = ints.get(t.id) ?? [];
+  const last = its[0];
+  const closed = s.closedStatuses.includes(t.status);
+  return `<a class="tree-row dash-row ${child ? 'tree-child' : ''} ${closed || t.deactivated ? 'tree-closed' : ''}" href="/trr/${esc(t.id)}">
+    <span class="rag-glyph rag-g-${r}" aria-label="${esc(RAG_LABEL[r])}">${RAG_SYMBOL[r]}</span>
+    ${child ? '<span class="muted3" aria-hidden="true">↳</span>' : ''}
+    <span class="trr-num">#${t.num}</span>${trIdBadge(t)}
+    <span class="tree-title">${esc(t.title)}</span>
+    ${wide && last ? `<span class="small muted2 dash-last" title="${esc(last.note.slice(0, 300))}">${esc(last.type)} · ${esc(last.sensitive ? '🚩 flagged' : last.note.slice(0, 60))}</span>` : ''}
+    ${statusBadge(t.status)}
+    ${wide ? `<span class="dash-pri">${priorityBadge(t.priority)}</span>${t.myRole ? badge(t.myRole, 'role') : ''}<span class="small muted2 dash-logs">${its.length} log${its.length === 1 ? '' : 's'}</span>` : ''}
+    <span class="small tree-meta" style="color:${RAG_COLOR[r]}">${t.lastContact ? `${daysSince(t.lastContact)}d${t.activityVia ? ` <span class="muted2">via #${t.activityVia}</span>` : ''}` : '—'}</span></a>`;
+}
+
+/** Parents with their children directly beneath; orphaned children stand alone. */
+function familyRows(list: Trr[], ctx: DashCtx, ints: IntsByTrr, s: Settings, wide: boolean): string {
+  const ids = new Set(list.map(t => t.id));
+  return list.filter(t => !t.parentId || !ids.has(t.parentId))
+    .sort((a, b) => RAG_ORDER[rag(a.lastContact, s)] - RAG_ORDER[rag(b.lastContact, s)] || a.num - b.num)
+    .map(t => dashRow(t, false, ints, s, wide) +
+      (ctx.kids.get(t.id) ?? []).filter(k => ids.has(k.id)).map(k => dashRow(k, true, ints, s, wide)).join(''))
+    .join('');
+}
+
+function newTrLink(g: CustGroup, opp?: Opportunity | null): string {
+  const q = opp ? `opp=${encodeURIComponent(opp.id)}` : `customer=${encodeURIComponent(g.name)}`;
+  return `<a class="small muted2 add-tr" href="/trr/new?${q}" title="New TR${opp ? ` in ${esc(opp.name)}` : ` for ${esc(g.name)}`}">+ TR</a>`;
+}
+
+function custTile(g: CustGroup, ctx: DashCtx, ints: IntsByTrr, s: Settings): string {
+  const sections = byOpportunity(g, ctx);
+  const multi = sections.length > 1 || sections[0]?.opp;
+  return `
+  <section class="card cust-tile ${g.worst ? `edge-${g.worst}` : ''}" data-txt="${groupTxt(g, ctx)}" x-show="!q || $el.dataset.txt.includes(q.toLowerCase())">
+    <div class="row-between cust-tile-head">
+      <a href="${g.customer ? `/customer/${esc(g.customer.id)}` : '#'}"><strong class="lg">${esc(g.name)}</strong></a>
+      <span class="row small muted2">${tallyHtml(g.tally)}${newTrLink(g)}</span>
+    </div>
+    <div class="small muted2">${g.trrs.length} TR${g.trrs.length === 1 ? '' : 's'} · ${sections.filter(x => x.opp).length} opp${sections.filter(x => x.opp).length === 1 ? '' : 's'}${g.latest ? ` · last contact ${daysSince(g.latest)}d ago` : ''}</div>
+    ${sections.map(sec => `
+      ${multi ? `<div class="tree-opp row-between">${sec.opp
+        ? `<span><a href="/opp/${esc(sec.opp.id)}">◇ ${esc(sec.opp.name)}</a>${sec.opp.stage ? ` <span class="small muted2">${esc(sec.opp.stage)}</span>` : ''}</span>${tallyHtml(tallyOf(sec.trrs, s))}`
+        : '<span class="muted2">No opportunity</span>'}</div>` : ''}
+      ${familyRows(sec.trrs, ctx, ints, s, false)}`).join('')}
+  </section>`;
+}
+
+function custTree(groups: CustGroup[], ctx: DashCtx, ints: IntsByTrr, s: Settings): string {
+  return `
+  <div class="cust-tree card" x-data>
+    <div class="row-between tree-tools">
+      <span class="small muted2">${groups.length} customer${groups.length === 1 ? '' : 's'} · Customer › Opportunity › Parent › Child</span>
+      <span class="row">
+        <button type="button" class="btn btn-sm btn-outline" @click="$root.querySelectorAll('details.tnode').forEach(d => d.open = true)">Expand all</button>
+        <button type="button" class="btn btn-sm btn-outline" @click="$root.querySelectorAll('details.tnode').forEach(d => d.open = false)">Collapse all</button>
+      </span>
+    </div>
+    ${groups.map(g => {
+      const sections = byOpportunity(g, ctx);
+      return `
+      <details class="tnode tnode-cust ${g.worst ? `edge-${g.worst}` : ''}" open data-txt="${groupTxt(g, ctx)}" x-show="!q || $el.dataset.txt.includes(q.toLowerCase())">
+        <summary>
+          <span class="tcaret" aria-hidden="true"></span>
+          <strong>${esc(g.name)}</strong>
+          ${g.customer ? `<a class="small muted2 tlink" href="/customer/${esc(g.customer.id)}" @click.stop>account ›</a>` : ''}
+          <span class="tspacer"></span>
+          ${tallyHtml(g.tally)}
+          <span class="small muted2 tcount">${g.trrs.length} TR${g.trrs.length === 1 ? '' : 's'}${g.latest ? ` · ${daysSince(g.latest)}d` : ''}</span>
+          ${newTrLink(g)}
+        </summary>
+        ${sections.map(sec => sec.opp ? `
+          <details class="tnode tnode-opp" open>
+            <summary>
+              <span class="tcaret" aria-hidden="true"></span>
+              <span>◇ ${esc(sec.opp.name)}</span>${sec.opp.stage ? ` <span class="small muted2">${esc(sec.opp.stage)}</span>` : ''}
+              <a class="small muted2 tlink" href="/opp/${esc(sec.opp.id)}" @click.stop>open ›</a>
+              <span class="tspacer"></span>${tallyHtml(tallyOf(sec.trrs, s))}${newTrLink(g, sec.opp)}
+            </summary>
+            <div class="tleaves">${familyRows(sec.trrs, ctx, ints, s, true)}</div>
+          </details>` : `
+          <div class="tnode-opp tnode-none">
+            ${sections.length > 1 ? '<div class="small muted2 tnone-head">No opportunity</div>' : ''}
+            <div class="tleaves">${familyRows(sec.trrs, ctx, ints, s, true)}</div>
+          </div>`).join('')}
+      </details>`;
+    }).join('')}
+  </div>`;
 }
 
 export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: string, backlog: number, ctx: DashCtx): string {
@@ -86,31 +244,20 @@ export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: str
 
   let body: string;
   const useFamily = ctx.group !== 'flat' && filter === 'all';
-  if (ctx.group === 'customer') {
-    const groups = new Map<string, Trr[]>();
-    for (const t of sorted) {
-      const k = t.customerId || t.customer;
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k)!.push(t);
-    }
-    body = [...groups.entries()]
-      .sort((a, b) => (a[1][0]!.customer).localeCompare(b[1][0]!.customer))
-      .map(([cid, list]) => {
-        const c = ctx.customers.get(cid);
-        const wr = worstRag(list, s);
-        return `<section class="cust-group" data-txt="${esc(list.map(t => `#${t.num} ${t.externalId} ${t.customer} ${t.title}`).join(' ').toLowerCase())}"
-          x-show="!q || $el.dataset.txt.includes(q.toLowerCase())">
-          <div class="cust-head row-between">
-            <a href="${c ? `/customer/${esc(c.id)}` : '#'}"><strong>${esc(list[0]!.customer)}</strong></a>
-            <span class="small muted2">${list.length} TR${list.length === 1 ? '' : 's'}${wr ? ` · worst <span class="rag-g-${wr}">${RAG_SYMBOL[wr]}</span>` : ''}</span>
-          </div>
-          <div class="trr-grid">${filter === 'all' ? familyCards(list) : list.map(t => trrCard(t, ints.get(t.id) ?? [], s, { opp: oppName(t) })).join('')}</div>
-        </section>`;
-      }).join('');
+  if (ctx.group === 'grid' || ctx.group === 'tree') {
+    const groups = customerGroups(sorted, ctx, s);
+    body = ctx.group === 'grid'
+      ? `<div class="cust-grid">${groups.map(g => custTile(g, ctx, ints, s)).join('')}</div>`
+      : custTree(groups, ctx, ints, s);
   } else if (useFamily) {
     body = `<div class="trr-grid">${familyCards(sorted, { showCustomer: false })}</div>`;
   } else {
-    body = `<div class="trr-grid">${sorted.map(t => trrCard(t, ints.get(t.id) ?? [], s, { opp: oppName(t) })).join('')}</div>`;
+    // Requests: the TRs that carry actual work — children and standalone TRs.
+    // A parent with children is the project-management wrapper, so it is left out here.
+    const byId = new Map(trrs.map(t => [t.id, t]));
+    const reqs = sorted.filter(t => !(ctx.kids.get(t.id)?.length));
+    body = `<div class="trr-grid">${reqs.map(t => trrCard(t, ints.get(t.id) ?? [], s, {
+      opp: oppName(t), parent: t.parentId ? byId.get(t.parentId) : undefined })).join('')}</div>`;
   }
 
   const gbtn = (g: DashCtx['group'], label: string) =>
@@ -133,7 +280,7 @@ export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: str
     <div class="row dash-tools">
       <input class="list-filter" x-model="q" placeholder="🔍 Filter by #, TR ID, customer, title, status, theme…">
       <div class="segmented" role="group" aria-label="Group by">
-        ${gbtn('family', 'Families')}${gbtn('customer', 'By customer')}${gbtn('flat', 'Flat')}
+        ${gbtn('family', 'Families')}${gbtn('grid', '▦ Customer grid')}${gbtn('tree', '🌳 Tree')}${gbtn('flat', 'Requests')}
       </div>
     </div>
     ${sorted.length === 0 ? '<div class="card muted center">No TRs match.</div>' : ''}

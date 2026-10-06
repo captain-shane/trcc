@@ -39,7 +39,8 @@ function intsByTrr(): Map<string, Interaction[]> {
 pages.get('/', (req, res) => {
   const filter = String(req.query.f ?? 'all');
   const g = String(req.query.g ?? 'family');
-  const group = g === 'customer' || g === 'flat' ? g : 'family';
+  // 'customer' was the 2.x/3.0-beta name of the grid view — keep old links working
+  const group = g === 'customer' || g === 'grid' ? 'grid' : g === 'tree' || g === 'flat' ? g : 'family';
   const backlog = repo.interactionsNeedingExec(500).length;
   const s = repo.getSettings();
   const active = repo.withFamilyActivity(repo.listTrrs('active'));
