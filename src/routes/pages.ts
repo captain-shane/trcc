@@ -53,6 +53,7 @@ pages.get('/', (req, res) => {
     kids: repo.childrenIndex(active),
     updatesDue: c.due + c.overdue,
     cycleDue: desk.cycleDue,
+    v2Pending: repo.v2UpgradeState() === 'pending',
   }));
 });
 

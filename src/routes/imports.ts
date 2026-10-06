@@ -8,6 +8,11 @@ import {
 import { importDonePage, importDraftPage, importMain, importPage } from '../views/imports.js';
 import { errorBox, jobProgress } from '../views/components.js';
 import { HierarchyError } from '../db/repo.js';
+import {
+  DEFAULT_MIGRATE, MIGRATE_FIELDS, applyMigration, buildMigrationPlan, currentDraft, saveMigrateOptions, suggestShapes,
+  type MigrateField, type MigrateOptions,
+} from '../services/migrate2.js';
+import { migrateMain, migratePage } from '../views/migrate.js';
 
 export const imports = Router();
 
@@ -37,6 +42,7 @@ imports.get('/import/:id', (req, res) => {
   const id = String(req.params.id);
   const d = loadDraft(id);
   if (!d) return res.status(404).send(importPage(repo.listImports(), repo.getSettings(), { error: 'That import no longer exists.' }));
+  if (d.rec.kind === 'migration' && d.rec.status === 'draft') return res.redirect(303, '/migrate');
   const s = repo.getSettings();
   if (d.rec.status !== 'draft') {
     const result = d.rec.resultJson ? JSON.parse(d.rec.resultJson) as ImportResult : null;
@@ -122,4 +128,72 @@ imports.post('/import/:id/undo', (req, res) => {
 imports.post('/import/:id/delete', (req, res) => {
   repo.deleteImport(String(req.params.id));
   res.redirect(303, '/import');
+});
+
+// --- 2.x → 3.0 restructure wizard ------------------------------------------------
+
+const MFIELDS = new Set<string>(MIGRATE_FIELDS.map(f => f.key));
+
+/** Form → options. A TR ID typed by hand is kept only where it differs from what the search found. */
+function migrateFromForm(body: Record<string, unknown>, prev: MigrateOptions): MigrateOptions {
+  const fields = list(body.fields).filter(f => MFIELDS.has(f)) as MigrateField[];
+  const include = new Set(list(body.include));
+  const base: MigrateOptions = {
+    example: String(body.example ?? '').trim().slice(0, 60),
+    pattern: String(body.pattern ?? '').trim().slice(0, 300),
+    fields, includeClosed: body.includeClosed === '1', overrides: {}, skip: list(body.keys).filter(k => !include.has(k)),
+  };
+  // a new example or new fields re-run the search: earlier hand edits no longer apply
+  const searchChanged = base.example !== prev.example || base.pattern !== prev.pattern || base.fields.join() !== prev.fields.join();
+  const auto = buildMigrationPlan(base, repo.getSettings());
+  const autoChosen = new Map(auto.groups.flatMap(g => g.rows).map(r => [r.trr.id, r.chosen]));
+  if (!searchChanged) {
+    for (const [k, v] of Object.entries(body)) {
+      if (!k.startsWith('id_')) continue;
+      const tid = k.slice(3);
+      const typed = String(v).trim().slice(0, 100);
+      if (autoChosen.has(tid) && typed !== autoChosen.get(tid)) base.overrides[tid] = typed;
+    }
+  }
+  return base;
+}
+
+function migrateView(error = ''): string {
+  const { id, opts } = currentDraft();
+  const s = repo.getSettings();
+  return migratePage(id, opts, buildMigrationPlan(opts, s), suggestShapes(), s, error);
+}
+
+imports.get('/migrate', (_req, res) => res.send(migrateView()));
+
+imports.post('/migrate/:id/preview', (req, res) => {
+  const id = String(req.params.id);
+  const rec = repo.getImport(id);
+  if (!rec || rec.kind !== 'migration' || rec.status !== 'draft') return res.send(errorBox('That restructure is no longer a draft — reload the page.'));
+  const prev = { ...DEFAULT_MIGRATE, ...(JSON.parse(rec.optionsJson) as Partial<MigrateOptions>) };
+  const opts = migrateFromForm(req.body, prev);
+  saveMigrateOptions(id, opts);
+  res.send(migrateMain(id, opts, buildMigrationPlan(opts, repo.getSettings()), suggestShapes()));
+});
+
+imports.post('/migrate/:id/apply', (req, res) => {
+  const id = String(req.params.id);
+  const rec = repo.getImport(id);
+  if (!rec || rec.kind !== 'migration' || rec.status !== 'draft') return res.redirect(303, '/migrate');
+  if (req.body.opts === '1') {
+    const prev = { ...DEFAULT_MIGRATE, ...(JSON.parse(rec.optionsJson) as Partial<MigrateOptions>) };
+    saveMigrateOptions(id, migrateFromForm(req.body, prev));
+  }
+  try {
+    applyMigration(id);
+    res.redirect(303, `/import/${id}`);
+  } catch (e) {
+    if (!(e instanceof HierarchyError) && !(e instanceof Error)) throw e;
+    res.send(migrateView(`Nothing was changed: ${(e as Error).message}`));
+  }
+});
+
+imports.post('/migrate/dismiss', (_req, res) => {
+  if (repo.v2UpgradeState() === 'pending') repo.setV2UpgradeState('dismissed');
+  res.redirect(303, '/');
 });
