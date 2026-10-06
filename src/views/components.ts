@@ -188,7 +188,7 @@ export function interactionForm(trrId: string, i?: Interaction, related: Trr[] =
       ${field('Date', `<input type="date" name="date" value="${esc(i?.date ?? new Date().toISOString().slice(0, 10))}">`)}
     </div>
     ${field('Notes', `<textarea name="note" rows="10" placeholder="Dump notes here — meeting notes, call transcripts, pasted email threads…">${esc(i?.note ?? '')}</textarea>`)}
-    <label class="check"><input type="checkbox" name="sensitive" ${i?.sensitive ? 'checked' : ''}> Sensitive (extra caution flag)</label>
+    <label class="check"><input type="checkbox" name="sensitive" ${i?.sensitive ? 'checked' : ''}> 🚩 Flag this log <span class="muted2">(won't be passed to AI — no summaries, drafts, reviews, or semantic search; any AI text already made from it is cleared)</span></label>
     ${others.length ? `
     <details class="field" ${linked.length ? 'open' : ''}>
       <summary class="field-label">Also applies to (${others.length} related TR${others.length === 1 ? '' : 's'})</summary>
@@ -221,7 +221,7 @@ export function interactionCard(i: Interaction, opts: IntCardOpts = {}): string 
       <div class="row">
         ${badge(i.type, 'st-plain')}
         <span class="small muted2">${esc(i.date)}</span>
-        ${i.sensitive ? badge('Sensitive', 'st-lost') : ''}
+        ${i.sensitive ? `<span class="badge st-lost" title="Flagged: this log is never passed to AI">🚩 Flagged · not sent to AI</span>` : ''}
         ${hasAi ? badge('AI', 'st-won') : ''}
         ${i.source === 'update' ? badge('Posted update', 'role') : ''}
         ${opts.owner ? `<a class="badge cx" href="/trr/${esc(opts.owner.id)}" title="Logged on this TR">from #${opts.owner.num} ${esc(opts.owner.externalId)}</a>` : ''}
@@ -229,7 +229,7 @@ export function interactionCard(i: Interaction, opts: IntCardOpts = {}): string 
       </div>
       <div class="row">
         <a class="btn btn-outline btn-sm" href="/interactions/${esc(i.id)}/edit">✏️</a>
-        ${ai ? `<button class="btn btn-outline btn-sm" title="Generate customer + exec versions"
+        ${ai && !i.sensitive ? `<button class="btn btn-outline btn-sm" title="Generate customer + exec versions"
           hx-post="/interactions/${esc(i.id)}/ai" hx-target="#int-${esc(i.id)}" hx-swap="outerHTML"
           hx-indicator="#int-${esc(i.id)} .ai-ind">🤖 AI</button>` : ''}
         <form method="post" action="/interactions/${esc(i.id)}/delete" onsubmit="return confirm('Delete this interaction?')" style="display:inline">
@@ -396,7 +396,7 @@ export function updateRowCard(r: DeskRow, cycleDue: string, aiEnabled: boolean, 
     </div>
     ${r.entries.length && r.state !== 'posted' ? `
     <details class="small"><summary class="muted2">Entries in this window (${r.entries.length})</summary>
-      ${r.entries.map(i => `<div class="upd-entry"><span class="muted2">${esc(i.date)} ${esc(i.type)}</span> ${esc((i.aiExec || i.note).replace(/\s+/g, ' ').slice(0, 220))}</div>`).join('')}
+      ${r.entries.map(i => `<div class="upd-entry"><span class="muted2">${esc(i.date)} ${esc(i.type)}</span> ${i.sensitive ? '🚩 <em>flagged — not sent to AI</em> · ' : ''}${esc((i.aiExec || i.note).replace(/\s+/g, ' ').slice(0, 220))}</div>`).join('')}
     </details>` : ''}
   </div>`;
 }

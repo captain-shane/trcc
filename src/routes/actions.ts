@@ -225,6 +225,7 @@ actions.post('/interactions/:id/ai', async (req, res) => {
   if (!i || !t) return res.status(404).send('');
   const s = repo.getSettings();
   if (!s.aiEnabled) return res.send(AI_OFF_MSG);
+  if (i.sensitive) return res.send(interactionCard(i, { aiError: 'This log is flagged — it is never sent to AI.' }));
   const vars = {
     customer: t.customer, project: t.title, contact: t.contact,
     status: t.status, date: i.date, notes: i.note,

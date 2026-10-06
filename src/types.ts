@@ -74,7 +74,7 @@ export interface Interaction {
   note: string;
   aiExec: string;        // generated exec summary ('' = none yet)
   aiCust: string;        // generated customer-facing version
-  sensitive: boolean;
+  sensitive: boolean;    // shown as 🚩 Flagged: NEVER passed to any model (prompts, backfill, embeddings)
   source: string;        // '' = logged by the user; 'update' = auto-logged record of a posted weekly update
   createdAt: string;
 }

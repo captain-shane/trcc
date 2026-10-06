@@ -125,7 +125,7 @@ export function deskRow(trrId: string, cycleDue?: string): DeskRow | null {
 const ENTRY_CHARS = 1_400;
 
 function entryLine(i: Interaction, owner: Trr): string {
-  const body = (i.aiExec || i.note).replace(/\s+/g, ' ').trim().slice(0, ENTRY_CHARS);
+  const body = repo.aiSafeText(i).replace(/\s+/g, ' ').trim().slice(0, ENTRY_CHARS);
   const via = i.trrId !== owner.id ? ` (logged on #${repo.getTrr(i.trrId)?.num ?? '?'})` : '';
   return `- [${i.date}] ${i.type}${via}: ${body}`;
 }
@@ -151,6 +151,8 @@ export function plainDraft(row: Pick<DeskRow, 'trr' | 'entries' | 'windowFrom'>)
     return `-Status: ${t.status}\n-Activity: No new activity since the last update (${localDay(row.windowFrom)}).\n-Next: none recorded`;
   }
   const bullets = [...row.entries].reverse().map(i => {
+    // Flagged entries are marked, not quoted: this text is pasted into another system.
+    if (i.sensitive) return `  • ${i.date} ${i.type}: 🚩 flagged entry (content not included)`;
     const first = (i.aiExec || i.note).replace(/\s+/g, ' ').trim();
     return `  • ${i.date} ${i.type}: ${first.length > 160 ? first.slice(0, 157) + '…' : first}`;
   });

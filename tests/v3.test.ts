@@ -253,6 +253,69 @@ describe('summary planning', () => {
   });
 });
 
+describe('flagged logs never reach a model', () => {
+  it('are excluded from backfill, review context, drafts, summaries and the official record sent to AI', async () => {
+    const { buildContext } = await import('../src/services/review.js');
+    const { computePeriodDigest } = await import('../src/services/digest.js');
+    const t = base({ customer: 'Flag Co', title: 'f' }); repo.insertTrr(t);
+    const secret = 'SECRET-PAYLOAD official merger codename bluebird, long enough to be backfilled';
+    const fid = log(t.id, 1, secret);
+    repo.updateInteraction(fid, { sensitive: true });
+    log(t.id, 1, 'ordinary note that is fine to summarise for the record');
+
+    expect(repo.interactionsNeedingExec(1000).some(i => i.id === fid)).toBe(false);
+    expect(buildContext({ trrIds: [t.id] }).engagements).not.toContain('SECRET-PAYLOAD');
+    expect(buildContext({ trrIds: [t.id] }).engagements).toContain('flagged entry');
+    expect(repo.aiSafeText(repo.getInteraction(fid)!)).not.toContain('SECRET');
+    const off = computePeriodDigest(undefined, undefined, x => x.id === t.id).official;
+    expect(off.find(o => o.note.includes('SECRET'))!.flagged).toBe(true); // shown in Stats, filtered from prompts
+
+    const row = upd.deskRow(t.id)!;
+    const plain = upd.plainDraft(row);
+    expect(plain).not.toContain('SECRET');
+    expect(plain).toContain('flagged entry');
+  });
+
+  it('flagging a log clears AI text already generated from it', () => {
+    const t = base({ customer: 'Flag Co', title: 'g' }); repo.insertTrr(t);
+    const id = log(t.id, 1);
+    repo.updateInteraction(id, { aiExec: 'exec', aiCust: 'cust' });
+    repo.updateInteraction(id, { sensitive: true });
+    const i = repo.getInteraction(id)!;
+    expect(i.aiExec).toBe('');
+    expect(i.aiCust).toBe('');
+  });
+});
+
+describe('opportunity audit trail', () => {
+  it('records moves on the parent and, via the parent, on each child; renames and deletes too', () => {
+    const p = base({ customer: 'Audit Opp Co', title: 'parent' }); repo.insertTrr(p);
+    const cid = repo.getTrr(p.id)!.customerId;
+    const o1 = repo.insertOpportunity({ customerId: cid, name: 'Opp A', stage: 'Discovery', rep: '', closeDate: '', notes: '' });
+    const o2 = repo.insertOpportunity({ customerId: cid, name: 'Opp B', stage: '', rep: '', closeDate: '', notes: '' });
+    repo.updateTrr(p.id, { opportunityId: o1.id });
+    const c = base({ customer: 'Audit Opp Co', title: 'child', parentId: p.id }); repo.insertTrr(c);
+    repo.updateTrr(p.id, { opportunityId: o2.id });            // move the family
+
+    const ph = repo.listHistory(p.id).map(h => `${h.field}:${h.oldValue}->${h.newValue}`);
+    expect(ph).toContain('opportunity:->Opp A');
+    expect(ph).toContain('opportunity:Opp A->Opp B');
+    const num = repo.getTrr(p.id)!.num;
+    const ch = repo.listHistory(c.id).map(h => `${h.field}:${h.oldValue}->${h.newValue}`);
+    expect(ch).toContain(`opportunity (via parent #${num}):Opp A->Opp B`);
+    expect(repo.getTrr(c.id)!.opportunityId).toBe(o2.id);
+
+    repo.updateOpportunity(o2.id, { name: 'Opp B2', stage: 'Proposal' });
+    expect(repo.listHistory(p.id).some(h => h.field === 'opportunity (renamed)' && h.newValue === 'Opp B2')).toBe(true);
+    expect(repo.listHistory(c.id).some(h => h.field.startsWith('opportunity stage') && h.newValue === 'Proposal')).toBe(true);
+    expect(repo.opportunityAudit(['Opp A']).length).toBeGreaterThanOrEqual(2);
+
+    repo.deleteOpportunity(o2.id);
+    expect(repo.listHistory(p.id).some(h => h.field === 'opportunity (deleted)' && h.oldValue === 'Opp B2')).toBe(true);
+    expect(repo.getTrr(p.id)!.opportunityId).toBe('');
+  });
+});
+
 describe('demo data', () => {
   it('seeds a hierarchy and removes it cleanly, customers included', () => {
     repo.eraseAllData();

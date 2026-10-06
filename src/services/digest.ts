@@ -31,7 +31,7 @@ export interface PeriodDigest {
     customer: string; title: string; status: string; complexity: string; priority: string;
     myRole: string; valueTheme: string; interactions: number; first?: string; last?: string;
   }[];
-  official: { customer: string; date: string; type: string; note: string }[];
+  official: { customer: string; date: string; type: string; note: string; flagged?: boolean }[];
   narrative?: string | null;
   narrativeModel?: string;
   draftNote?: string;   // e.g. quality model OOM'd, fast model stepped in
@@ -84,6 +84,7 @@ export function computePeriodDigest(from?: string, to?: string, trrFilter?: (t: 
       customer: byId.get(i.trrId)?.customer ?? '?',
       date: i.date, type: i.type,
       note: i.note.replace(/\s+/g, ' ').trim(),
+      flagged: i.sensitive,
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
@@ -125,7 +126,7 @@ export async function periodDigest(from?: string, to?: string, draft = true): Pr
     closedWon: digest.closedWon, closedLost: digest.closedLost, themeCoverage: digest.themeCoverage,
     engagements: digest.perTrr,
   }, null, 1);
-  const officialBlock = digest.official.map(o => `- [${o.date}] ${o.customer}: ${o.note}`).join('\n');
+  const officialBlock = digest.official.filter(o => !o.flagged).map(o => `- [${o.date}] ${o.customer}: ${o.note}`).join('\n');
   const prompt = fillTemplate(s.evalTmpl, { facts, official: officialBlock });
   const statsJson = JSON.stringify(digest); // pure stats snapshot, pre-narrative
   try {
@@ -159,7 +160,7 @@ export async function trrDigest(id: string, { regen = false, store = true } = {}
     priority: t.priority, myRole: t.myRole, valueTheme: t.valueThemes.join(', '),
     contact: t.contact, rep: t.rep,
     description: t.description.replace(/\s+/g, ' ').trim(),
-    interactions: its.map(i => `[${i.date}] ${i.type}: ${i.note.replace(/\s+/g, ' ').trim()}`).join('\n'),
+    interactions: its.map(i => `[${i.date}] ${i.type}: ${(i.sensitive ? repo.aiSafeText(i) : i.note).replace(/\s+/g, ' ').trim()}`).join('\n'),
   });
   const r = await generateWithFallback(prompt, s.digestModel, s.model);
   const entry: StoredDigest = {
@@ -185,7 +186,7 @@ export async function enrichExecSummaries(limit = 8): Promise<{ generated: numbe
     const pending = repo.interactionsNeedingExec(limit + 200); // total queue size for "remaining"
     for (const it of pending.slice(0, limit)) {
       const t = repo.getTrr(it.trrId);
-      if (!t) continue;
+      if (!t || repo.getInteraction(it.id)?.sensitive) continue; // flagged since queued: never sent
       const prompt = fillTemplate(s.execTmpl, {
         customer: t.customer, project: t.title, status: t.status,
         contact: t.contact, date: it.date, notes: it.note,
@@ -194,7 +195,7 @@ export async function enrichExecSummaries(limit = 8): Promise<{ generated: numbe
       if (text) {
         // Merge by id: only fill if still empty, so concurrent edits never lose data.
         const fresh = repo.getInteraction(it.id);
-        if (fresh && !fresh.aiExec) {
+        if (fresh && !fresh.aiExec && !fresh.sensitive) {
           repo.updateInteraction(it.id, { aiExec: text });
           generated++;
         }

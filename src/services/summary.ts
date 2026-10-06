@@ -67,7 +67,8 @@ function requestsText(scope: ResolvedScope): string {
 function entryLine(i: Interaction, byId: Map<string, Trr>): string {
   const t = byId.get(i.trrId);
   const tag = t ? (t.externalId || `#${t.num}`) : '?';
-  const body = (i.aiExec && i.note.length > 1_400 ? i.aiExec : i.note).replace(/\s+/g, ' ').trim().slice(0, 1_400);
+  const raw = i.sensitive ? repo.aiSafeText(i) : (i.aiExec && i.note.length > 1_400 ? i.aiExec : i.note);
+  const body = raw.replace(/\s+/g, ' ').trim().slice(0, 1_400);
   return `- [${i.date}] ${tag} ${i.type}: ${body}`;
 }
 

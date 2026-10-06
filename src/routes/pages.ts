@@ -143,8 +143,16 @@ pages.get('/opp/:id', (req, res) => {
   const o = repo.getOpportunity(req.params.id);
   const c = o && repo.getCustomer(o.customerId);
   if (!o || !c) return res.status(404).send(views.notFound());
+  // Follow renames backwards so moves recorded under an earlier name still show.
+  const names = new Set([o.name]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const h of repo.opportunityAudit([...names])) {
+      if (h.field === 'opportunity (renamed)' && names.has(h.newValue) && !names.has(h.oldValue)) { names.add(h.oldValue); grew = true; }
+    }
+  }
   res.send(views.oppPage(o, c, repo.withFamilyActivity(repo.listTrrs('all').filter(t => t.opportunityId === o.id)), repo.getSettings(),
-    repo.listSummaries('opportunity', o.id)));
+    repo.listSummaries('opportunity', o.id), repo.opportunityAudit([...names])));
 });
 
 pages.get('/updates', (req, res) => {
