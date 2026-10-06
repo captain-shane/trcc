@@ -87,6 +87,7 @@ export function page(title: string, active: string, content: string): string {
 <header class="topbar">
   <a class="brand" href="/">🎯 <span>TR Command Center</span> <small>v${APP_VERSION.split('.')[0]}</small></a>
   <div class="topbar-actions">
+    <a class="btn btn-outline" href="/import" title="Import rows pasted from a sheet">⇪ Import</a>
     <a class="btn" href="/trr/new">+ New TR</a>
     <a class="btn btn-outline" href="/settings" title="Settings">⚙️</a>
   </div>

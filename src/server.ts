@@ -9,6 +9,7 @@ import { enrichExecSummaries } from './services/digest.js';
 import { pages } from './routes/pages.js';
 import { actions } from './routes/actions.js';
 import { api } from './routes/api.js';
+import { imports } from './routes/imports.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +34,7 @@ app.get('/healthz', (_req, res) => {
 app.use('/api', api);
 app.use(pages);
 app.use(actions);
+app.use(imports);
 
 app.use((_req, res) => res.status(404).send('Not found'));
 

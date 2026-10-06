@@ -50,8 +50,9 @@ export function currentCycleDue(s: Settings, today = localDay()): string {
 /** Logs that count as new since `from` (an ISO datetime): logged after it, or dated after its day. */
 export function windowEntries(trrId: string, from: string): Interaction[] {
   const fromDay = from ? localDay(from) : '';
+  // Imported logs are dated history, not something done this week: they count by their own date only.
   return repo.interactionsFor([trrId]).filter(i =>
-    i.source !== 'update' && (!from || i.createdAt > from || i.date > fromDay));
+    i.source !== 'update' && (!from || (i.source !== 'import' && i.createdAt > from) || i.date > fromDay));
 }
 
 function windowStart(lastPosted: TrUpdate | null, cadence: UpdateCadence, now: Date): string {
