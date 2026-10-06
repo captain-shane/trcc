@@ -46,8 +46,12 @@ kept in sync — so existing data, settings, and templates carry over untouched.
   recent contact across the family — any active child means the request is
   being worked. The tooltip and card say which child carries it; children keep
   their own health, and stalled children are still counted on the parent card.
-- **Dashboard grouping**: families (parent with its children), by customer, or
-  flat. Breadcrumbs on every TR.
+- **Dashboard views**: *Families* (parent cards with their children);
+  *Customer grid* (one tile per customer, worst health first, TRs grouped by
+  opportunity with health counts); *Tree* (collapsible Customer › Opportunity ›
+  Parent › Child with status, priority, role and last note); *Requests* (only
+  the TRs that carry the work, children and standalone TRs, each showing the
+  parent it belongs to). Breadcrumbs on every TR.
 - **Inline edits** on the TR page (status, priority, outcome, role) and an
   in-page log form.
 - **Flagged logs are never passed to AI.** The old "Sensitive" checkbox is now

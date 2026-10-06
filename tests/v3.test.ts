@@ -317,6 +317,37 @@ describe('opportunity audit trail', () => {
   });
 });
 
+describe('dashboard views', () => {
+  it('grid and tree group by customer; Requests leaves out parents', async () => {
+    const views = await import('../src/views/pages.js');
+    repo.eraseAllData();
+    seedIfEmpty();
+    const s = repo.getSettings();
+    const active = repo.withFamilyActivity(repo.listTrrs('active'));
+    const kids = repo.childrenIndex(active);
+    const ctx = (group: 'grid' | 'tree' | 'flat') => ({
+      group, kids, updatesDue: 0, cycleDue: '2026-10-08',
+      opps: new Map(repo.listOpportunities().map(o => [o.id, o])),
+      customers: new Map(repo.listCustomers().map(c => [c.id, c])),
+    });
+    const parents = active.filter(t => kids.get(t.id)?.length);
+    expect(parents.length).toBeGreaterThan(0);
+
+    const grid = views.dashboard(active, new Map(), s, 'all', 0, ctx('grid'));
+    const custCount = new Set(active.map(t => t.customerId)).size;
+    expect(grid.match(/class="card cust-tile/g)?.length).toBe(custCount);
+
+    const tree = views.dashboard(active, new Map(), s, 'all', 0, ctx('tree'));
+    expect(tree.match(/class="tnode tnode-cust/g)?.length).toBe(custCount);
+    for (const p of parents) expect(tree).toContain(`href="/trr/${p.id}"`);
+
+    const reqs = views.dashboard(active, new Map(), s, 'all', 0, ctx('flat'));
+    for (const p of parents) expect(reqs).not.toContain(`href="/trr/${p.id}"`);
+    for (const c of active.filter(t => t.parentId)) expect(reqs).toContain(`href="/trr/${c.id}"`);
+    expect(reqs).toContain('part of #');
+  });
+});
+
 describe('demo data', () => {
   it('seeds a hierarchy and removes it cleanly, customers included', () => {
     repo.eraseAllData();
