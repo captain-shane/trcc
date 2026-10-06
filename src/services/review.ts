@@ -70,7 +70,7 @@ function blocksFor(scope: ReviewScope): { blocks: RecordBlock[]; trrCount: numbe
       `${t.valueThemes.length ? ` | themes: ${t.valueThemes.join(', ')}` : ''}]`;
     const desc = t.description ? t.description.replace(/\s+/g, ' ').slice(0, 600) : '';
     const lines = its.map(i => {
-      const body = (i.aiExec || i.note).replace(/\s+/g, ' ').trim().slice(0, NOTE_CHARS);
+      const body = repo.aiSafeText(i).replace(/\s+/g, ' ').trim().slice(0, NOTE_CHARS);
       return `- [${i.date}] ${i.type}: ${body}`;
     });
     blocks.push({ trrId: t.id, text: [head, desc, ...lines].filter(Boolean).join('\n') });
@@ -257,7 +257,7 @@ export async function runReview(
     trimNotes.push('per-engagement facts list omitted (totals still complete)');
   }
 
-  let official = digest.official.map(o => `- [${o.date}] ${o.customer}: ${o.note}`).join('\n') || '(none in scope)';
+  let official = digest.official.filter(o => !o.flagged).map(o => `- [${o.date}] ${o.customer}: ${o.note}`).join('\n') || '(none in scope)';
   if (official.length > officialCap) {
     // keep the most recent — they are the ones a review period is about
     const lines = official.split('\n');

@@ -54,6 +54,11 @@ Settings afterwards anyway.
 - **Summary to date** — on demand for a TR, a parent + its children, an
   opportunity, or a customer. Versioned (every run kept) and incremental: later
   runs revise the previous summary with only what is new
+- **🚩 Flagged logs** — a flagged interaction is never passed to any model
+  (summaries, drafts, reviews, digests, embeddings); flagging clears AI text
+  already derived from it
+- **Audit trail for opportunity moves** — on the TR, on each child (via its
+  parent), and on the opportunity page
 - **Inline editing** — status, priority, outcome, and role change in place on
   the TR page; logging happens without leaving it
 - **Interaction log** — paste raw notes of any size (calls, meetings,

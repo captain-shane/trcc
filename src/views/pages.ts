@@ -467,7 +467,7 @@ export function customerPage(c: Customer, all: Customer[], opps: Opportunity[], 
   </div>`);
 }
 
-export function oppPage(o: Opportunity, c: Customer, trrs: Trr[], s: Settings, versions: ScopeSummary[]): string {
+export function oppPage(o: Opportunity, c: Customer, trrs: Trr[], s: Settings, versions: ScopeSummary[], audit: (TrrHistoryEntry & { num: number; title: string })[] = []): string {
   const kids = new Map<string, Trr[]>();
   for (const t of trrs) if (t.parentId) { if (!kids.has(t.parentId)) kids.set(t.parentId, []); kids.get(t.parentId)!.push(t); }
   return page(o.name, '/accounts', `
@@ -492,6 +492,15 @@ export function oppPage(o: Opportunity, c: Customer, trrs: Trr[], s: Settings, v
     </div>
     <aside class="detail-side">
       ${summaryPanel('opportunity', o.id, versions, s.aiEnabled, { open: true })}
+      <details class="card" ${audit.length ? 'open' : ''}>
+        <summary><strong>📜 Audit trail</strong> <span class="small muted2">(${audit.length}) — TRs moved in/out, renames, stage changes</span></summary>
+        ${audit.length === 0 ? '<div class="small muted2">No changes recorded yet.</div>' : `<div class="timeline">${audit.map(h => `
+          <div class="timeline-row">
+            <span class="timeline-date">${esc(h.changedAt.slice(0, 10))}</span>
+            <span class="timeline-body"><a class="hl" href="/trr/${esc(h.trrId)}">#${h.num}</a> ${esc(h.field)}:
+              <span class="old">${esc(h.oldValue || '—')}</span> → <span class="hl">${esc(h.newValue || '—')}</span></span>
+          </div>`).join('')}</div>`}
+      </details>
       <div class="card">
         <form method="post" action="/opp/${esc(o.id)}/delete" onsubmit="return confirm('Delete this opportunity? Its TRs are kept and become unassigned.')">
           <button class="btn btn-outline danger btn-sm" type="submit">Delete opportunity</button>

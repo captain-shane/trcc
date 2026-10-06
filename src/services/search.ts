@@ -87,7 +87,7 @@ function cosine(a: Float32Array, b: Float32Array): number {
 export async function ensureIndex(model: string): Promise<number> {
   const missing = db.prepare(`
     SELECT i.id, i.note FROM interactions i
-    WHERE length(trim(i.note)) > 0
+    WHERE length(trim(i.note)) > 0 AND i.sensitive = 0
       AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.interaction_id = i.id AND e.model = ?)
   `).all(model) as { id: string; note: string }[];
   if (missing.length === 0) return 0;
@@ -126,7 +126,7 @@ export async function semanticSearch(q: string, limit = 15): Promise<SearchHit[]
     FROM embeddings e
     JOIN interactions i ON i.id = e.interaction_id
     JOIN trrs t ON t.id = i.trr_id
-    WHERE e.model = ?
+    WHERE e.model = ? AND i.sensitive = 0
   `).all(model) as {
     interaction_id: string; chunk_text: string; vector: Buffer;
     trr_id: string; type: string; date: string; customer: string; title: string;

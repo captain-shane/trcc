@@ -50,6 +50,18 @@ kept in sync — so existing data, settings, and templates carry over untouched.
   flat. Breadcrumbs on every TR.
 - **Inline edits** on the TR page (status, priority, outcome, role) and an
   in-page log form.
+- **Flagged logs are never passed to AI.** The old "Sensitive" checkbox is now
+  🚩 *Flag this log (won't be passed to AI)* and it is enforced everywhere a model
+  is called: per-note AI, exec-summary backfill, catch-up digests, period and
+  review narratives (including the official record), weekly drafts, summaries,
+  and semantic-search embeddings. Models see a "[flagged entry — content
+  withheld]" placeholder at most. Flagging a log clears any AI text already made
+  from it; plain (non-AI) weekly drafts mark the entry without quoting it.
+  Before 3.0 the flag was only a badge.
+- **Opportunity audit trail.** Every opportunity move is recorded on the TR — and
+  on each child, marked "via parent #N", when a parent moves — plus opportunity
+  renames, stage changes, and deletes (TRs become unassigned, with a record).
+  The opportunity page shows its own trail of TRs moved in and out.
 - `TZ` in docker-compose so due days follow your calendar, not UTC.
 - API: `/api/updates` (the desk as JSON), `/api/customers`; `/api/export` now
   includes customers, opportunities, links, updates, and summaries.

@@ -179,11 +179,17 @@ export function updateTrr(id: string, patch: Partial<Trr>): void {
       recordHistory(id, 'deactivation', cur.deactivated ? 'deactivated' : 'active',
         t.deactivated ? 'deactivated' : 'active');
     }
-    // Children follow their parent's customer and opportunity.
+    // Children follow their parent's customer and opportunity — and the move is
+    // recorded on each child too, so every TR's own trail is complete.
     if (cur.customerId !== t.customerId || cur.opportunityId !== t.opportunityId) {
+      const via = `via parent #${cur.num}`;
       for (const c of listChildren(id)) {
         db.prepare('UPDATE trrs SET customer=?, customer_id=?, opportunity_id=? WHERE id=?')
           .run(t.customer, nul(t.customerId), nul(t.opportunityId), c.id);
+        if (c.customer !== t.customer) recordHistory(c.id, `customer (${via})`, c.customer, t.customer);
+        if (c.opportunityId !== t.opportunityId) {
+          recordHistory(c.id, `opportunity (${via})`, oppName(c.opportunityId), oppName(t.opportunityId));
+        }
       }
     }
   })();
@@ -350,12 +356,35 @@ export function updateOpportunity(id: string, patch: Partial<Omit<Opportunity, '
   const cur = getOpportunity(id);
   if (!cur) return;
   const o = { ...cur, ...patch, name: (patch.name ?? cur.name).trim() || cur.name };
-  db.prepare(`UPDATE opportunities SET name=@name, stage=@stage, rep=@rep, close_date=@closeDate, notes=@notes WHERE id=@id`).run(o);
+  db.transaction(() => {
+    db.prepare(`UPDATE opportunities SET name=@name, stage=@stage, rep=@rep, close_date=@closeDate, notes=@notes WHERE id=@id`).run(o);
+    // The trail stores names, so a rename is written to every TR in it to keep the chain readable.
+    if (o.name !== cur.name) for (const t of trrsInOpportunity(id)) recordHistory(t.id, 'opportunity (renamed)', cur.name, o.name);
+    if (o.stage !== cur.stage) for (const t of trrsInOpportunity(id)) recordHistory(t.id, `opportunity stage (${o.name})`, cur.stage, o.stage);
+  })();
+}
+
+function trrsInOpportunity(id: string): { id: string }[] {
+  return db.prepare('SELECT id FROM trrs WHERE opportunity_id = ?').all(id) as { id: string }[];
+}
+
+/** Every opportunity move/rename/delete recorded on TRs, for an opportunity's audit view. */
+export function opportunityAudit(names: string[]): (TrrHistoryEntry & { num: number; title: string })[] {
+  if (!names.length) return [];
+  const ph = names.map(() => '?').join(',');
+  return (db.prepare(`
+    SELECT h.*, t.num, t.title FROM trr_history h JOIN trrs t ON t.id = h.trr_id
+    WHERE h.field LIKE 'opportunity%' AND (h.old_value IN (${ph}) OR h.new_value IN (${ph}))
+    ORDER BY h.changed_at DESC, h.id DESC
+  `).all(...names, ...names) as { id: number; trr_id: string; changed_at: string; field: string; old_value: string; new_value: string; num: number; title: string }[])
+    .map(r => ({ id: r.id, trrId: r.trr_id, changedAt: r.changed_at, field: r.field, oldValue: r.old_value, newValue: r.new_value, num: r.num, title: r.title }));
 }
 
 /** TRs in the opportunity become unassigned (ON DELETE SET NULL), never deleted. */
 export function deleteOpportunity(id: string): void {
+  const cur = getOpportunity(id);
   db.transaction(() => {
+    if (cur) for (const t of trrsInOpportunity(id)) recordHistory(t.id, 'opportunity (deleted)', cur.name, '');
     db.prepare(`DELETE FROM summaries WHERE scope_kind = 'opportunity' AND scope_id = ?`).run(id);
     db.prepare('DELETE FROM opportunities WHERE id = ?').run(id);
   })();
@@ -410,6 +439,12 @@ export function updateInteraction(id: string, patch: Partial<Interaction>): void
   const cur = getInteraction(id);
   if (!cur) return;
   const i = { ...cur, ...patch };
+  // A flagged log must not keep anything a model derived from it.
+  if (i.sensitive) {
+    i.aiExec = '';
+    i.aiCust = '';
+    db.prepare('DELETE FROM embeddings WHERE interaction_id = ?').run(id);
+  }
   db.prepare(`
     UPDATE interactions SET type=@type, date=@date, note=@note, ai_exec=@aiExec,
       ai_cust=@aiCust, sensitive=@sensitive WHERE id=@id
@@ -464,11 +499,16 @@ export function interactionsFor(trrIds: string[]): Interaction[] {
   `).all(...trrIds, ...trrIds) as IntRow[]).map(toInteraction);
 }
 
+/** Text that may go to a model: flagged logs are reduced to a placeholder, never their content. */
+export function aiSafeText(i: Interaction): string {
+  return i.sensitive ? '[flagged entry — content withheld from AI]' : (i.aiExec || i.note);
+}
+
 /** Interactions with substantive notes and no exec summary yet (backfill queue). */
 export function interactionsNeedingExec(limit: number): Interaction[] {
   return (db.prepare(`
     SELECT * FROM interactions
-    WHERE length(trim(note)) >= 40 AND ai_exec = '' AND source = '' ORDER BY date DESC LIMIT ?
+    WHERE length(trim(note)) >= 40 AND ai_exec = '' AND source = '' AND sensitive = 0 ORDER BY date DESC LIMIT ?
   `).all(limit) as IntRow[]).map(toInteraction);
 }
 
