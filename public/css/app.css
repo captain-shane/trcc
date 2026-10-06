@@ -313,3 +313,82 @@ details[open] > summary { margin-bottom: 8px; }
   color:var(--muted,#777);
   opacity:.8;
 }
+
+/* --- v3: hierarchy, Accounts, summaries, Update Desk --- */
+
+[x-cloak] { display: none !important; }
+.muted3 { color: var(--muted3); }
+.badge.ext-id { background: var(--c3); color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .02em; }
+
+/* breadcrumbs */
+.crumbs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; margin: 2px 0 10px; color: var(--muted2); }
+.crumbs a { color: var(--muted); }
+.crumbs a:hover { color: var(--text); text-decoration: underline; }
+.crumbs [aria-current] { color: var(--text); font-weight: 600; }
+.crumb-sep { color: var(--muted3); }
+
+/* segmented control (group-by, timeline scope, desk filter) */
+.segmented { display: inline-flex; border: 1px solid var(--c3); border-radius: 7px; overflow: hidden; flex-shrink: 0; }
+.seg { padding: 5px 11px; font-size: 12px; color: var(--muted2); border-right: 1px solid var(--c3); white-space: nowrap; }
+.seg:last-child { border-right: 0; }
+.seg.active { background: var(--c2); color: var(--text); font-weight: 600; }
+.dash-tools { margin-bottom: 10px; }
+.dash-tools .list-filter { margin: 0; flex: 1; min-width: 200px; }
+
+/* families on the dashboard: parent card with its children stacked beneath */
+.family { display: flex; flex-direction: column; gap: 6px; }
+.trr-grid .family .trr-card { height: auto; }
+.child-card { margin-left: 18px; border-left-style: dashed !important; }
+.trr-grid .child-card { padding: 8px 12px; }
+.child-title { color: var(--muted); }
+.family-line { color: var(--muted); }
+
+.cust-group { margin-bottom: 16px; }
+.cust-head { border-bottom: 1px solid var(--c2); padding: 4px 2px 6px; margin-bottom: 8px; }
+.cust-head strong { color: var(--text); font-size: 14px; }
+
+/* Accounts tree */
+.acct-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 10px; }
+.acct-grid .acct-card { margin: 0; }
+@media (max-width: 520px) { .acct-grid { grid-template-columns: minmax(0, 1fr); } }
+.tree-opp { margin: 8px 0 2px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.tree-row, .child-row {
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px; font-size: 12.5px; min-width: 0;
+}
+.tree-row:hover, .child-row:hover { background: var(--c2); }
+.tree-child { padding-left: 22px; }
+.tree-closed { opacity: .55; }
+.tree-title, .child-row .child-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.tree-meta { flex-shrink: 0; }
+
+/* TR page side panels */
+.quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.quick select { padding: 6px 8px; }
+.summary-block { margin-top: 6px; }
+.summary-panel summary, details.card > summary { cursor: pointer; }
+.job-card { margin: 8px 0; }
+.job-card .hbar-track { margin-top: 4px; height: 8px; }
+
+/* Update Desk — state = shape + colour, never colour alone */
+.badge.ds { background: var(--c2); border: 1px solid currentColor; }
+.ds-overdue { color: var(--red); }
+.ds-due { color: var(--yellow); }
+.ds-draft { color: #60a5fa; }
+.ds-posted { color: var(--green); }
+.ds-notdue { color: var(--muted2); }
+.upd-row { border-left: 3px solid var(--c3); }
+.ds-overdue-row { border-left-color: var(--red); }
+.ds-due-row { border-left-color: var(--yellow); }
+.ds-draft-row { border-left-color: #60a5fa; }
+.ds-posted-row { border-left-color: var(--green); opacity: .85; }
+.ds-notdue-row { opacity: .6; }
+.upd-text { margin: 8px 0 4px; white-space: pre-wrap; }
+.upd-actions { margin-top: 6px; }
+.upd-entry { padding: 3px 0; border-top: 1px solid var(--c2); }
+.upd-hist { margin: 6px 0; }
+.btn.btn-post { background: var(--green); color: #06220f; }
+.btn-outline.btn-post { background: transparent; color: var(--green); border-color: var(--green); }
+.desk-group { margin-top: 14px; }
+.desk-cust { border-bottom: 1px solid var(--c2); padding-bottom: 4px; }
+.desk-parent { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0 4px; font-size: 12.5px; color: var(--muted); }
+.tile-value.ds-overdue, .tile-value.ds-due, .tile-value.ds-draft, .tile-value.ds-posted, .tile-value.ds-notdue { font-weight: 700; }

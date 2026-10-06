@@ -1,6 +1,10 @@
 import { db } from './index.js';
-import { insertInteraction, insertTrr, recordHistory } from './repo.js';
-import { uid, type Interaction, type Trr } from '../types.js';
+import {
+  getSettings, getTrr, insertInteraction, insertOpportunity, insertTrr, markUpdatePosted,
+  recordHistory, saveUpdateDraft, setInteractionLinks,
+} from './repo.js';
+import { addDays, cycleDueFor, localDay } from '../services/cycle.js';
+import { uid, type Interaction, type NewTrr } from '../types.js';
 
 // Realistic-but-fictional seed data exercising every feature: RAG states,
 // deactivation + archive countdown, closed/archived TRRs, structured fields,
@@ -9,8 +13,8 @@ import { uid, type Interaction, type Trr } from '../types.js';
 const iso = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
 const day = (daysAgo: number) => iso(daysAgo).slice(0, 10);
 
-type SeedTrr = Omit<Trr, 'id' | 'num' | 'createdAt' | 'lastContact'> & { createdDaysAgo: number };
-type SeedInt = { trr: number; type: Interaction['type']; daysAgo: number; note: string; sensitive?: boolean };
+type SeedTrr = Omit<NewTrr, 'id' | 'createdAt' | 'lastContact'> & { createdDaysAgo: number; parent?: number };
+type SeedInt = { trr: number; type: Interaction['type']; daysAgo: number; note: string; sensitive?: boolean; also?: number[] };
 
 const trrs: SeedTrr[] = [
   { // 0 — green, active lead
@@ -93,6 +97,51 @@ const trrs: SeedTrr[] = [
     myRole: 'Lead', outcome: 'Ongoing', valueThemes: ['Automation', 'Networking'],
     deactivated: false, deactivatedAt: '', createdDaysAgo: 28,
   },
+  // --- v3 hierarchy: child TRs under two parent requests -----------------------
+  { // 10 — child of Meridian (0)
+    customer: 'Meridian Health Group', title: 'Wave 2 — scheduling and lab systems cutover',
+    status: 'In Progress', complexity: 'Medium', priority: 'High',
+    contact: 'Dana Whitfield', rep: 'Chris Alvarez', targetClose: day(-20),
+    description: 'Five applications including the scheduling system and two lab-results integrations; weekend cutover windows only.',
+    myRole: 'Lead', outcome: 'Ongoing', valueThemes: ['Cloud'],
+    deactivated: false, deactivatedAt: '', createdDaysAgo: 20, parent: 0,
+  },
+  { // 11 — child of Meridian (0), quiet this week
+    customer: 'Meridian Health Group', title: 'Quarantine workflow for non-compliant workloads',
+    status: 'New', complexity: 'Medium', priority: 'Medium',
+    contact: 'Dana Whitfield', rep: 'Chris Alvarez', targetClose: day(-40),
+    description: 'Security team request raised at the wave 2 readiness review: isolate workloads missing required agents or tags until remediated.',
+    myRole: 'SME', outcome: 'Ongoing', valueThemes: ['Security', 'Compliance'],
+    deactivated: false, deactivatedAt: '', createdDaysAgo: 8, parent: 0,
+  },
+  { // 12 — child of Bluewater (1)
+    customer: 'Bluewater Logistics', title: 'LTE failover design — depot cellular',
+    status: 'POC', complexity: 'Medium', priority: 'High',
+    contact: 'Marcus Reed', rep: 'Priya Nair', targetClose: day(-50),
+    description: 'Carrier selection, APN design and failover thresholds for the cellular backup path at all 62 depots.',
+    myRole: 'Lead', outcome: 'Ongoing', valueThemes: ['Networking'],
+    deactivated: false, deactivatedAt: '', createdDaysAgo: 30, parent: 1,
+  },
+];
+
+// TR IDs from the (fictional) upstream request system.
+const extIds: Record<number, string> = {
+  0: 'TR-10421', 1: 'TR-10388', 2: 'TR-10455', 3: 'TR-10302', 4: 'TR-10517', 5: 'TR-10277',
+  6: 'TR-10115', 7: 'TR-10164', 8: 'TR-10050', 9: 'TR-10490', 10: 'TR-10422', 11: 'TR-10423', 12: 'TR-10389',
+};
+
+// Opportunities: `trr` names the TR whose customer owns it; `members` are the
+// top-level TRs placed in it (children follow their parent automatically).
+const opps: { trr: number; name: string; stage: string; rep: string; closeDaysAhead: number; members: number[] }[] = [
+  { trr: 0, name: 'Clinical cloud program FY27', stage: 'Technical validation', rep: 'Chris Alvarez', closeDaysAhead: 45, members: [0] },
+  { trr: 1, name: 'Depot WAN refresh', stage: 'Proposal', rep: 'Priya Nair', closeDaysAhead: 60, members: [1] },
+  { trr: 6, name: 'Zero-trust access rollout', stage: 'Closed Won', rep: 'Chris Alvarez', closeDaysAhead: -20, members: [6] },
+];
+
+// Updates posted LAST cycle, so the desk shows "since last update" next to overdue ones.
+const postedLastCycle: { trr: number; text: string }[] = [
+  { trr: 4, text: '-Status: In Progress\n-Activity: Exec sponsor briefing held; discovery-first plan agreed, then tiered AI usage policy.\n-Next: policy design session' },
+  { trr: 10, text: '-Status: In Progress\n-Activity: Wave 2 scoped — five apps incl. scheduling; weekend cutover windows confirmed.\n-Next: cutover runbook review' },
 ];
 
 const ints: SeedInt[] = [
@@ -100,7 +149,7 @@ const ints: SeedInt[] = [
   { trr: 0, type: 'Meeting', daysAgo: 38, note: 'Kickoff with infrastructure + security teams. Current state: 14 clinical apps across two aging data centers, ~4,200 users. Pain: hardware end-of-life, DR gaps, audit findings. Agreed 3-wave migration plan; wave 1 = six low-risk apps.' },
   { trr: 0, type: 'Call', daysAgo: 30, note: 'Architecture review: landing zone design, private connectivity to both DCs during transition, encryption-at-rest requirements from their compliance team, backup/restore targets per app tier.' },
   { trr: 0, type: 'Note', daysAgo: 21, note: 'OFFICIAL update: Wave 1 complete — six applications migrated, helpdesk tickets down 40% vs baseline week. Monitoring dashboards live for the pilot group. Wave 2 (five apps including the scheduling system) now planned.' },
-  { trr: 0, type: 'Meeting', daysAgo: 8, note: 'Wave 2 readiness review. Capacity and cost model approved. Security team asked for a quarantine workflow for non-compliant workloads; agreed on a tagging + restricted-network design. Open item: 8% of legacy clients still on an old agent.' },
+  { trr: 0, type: 'Meeting', daysAgo: 8, note: 'Wave 2 readiness review. Capacity and cost model approved. Security team asked for a quarantine workflow for non-compliant workloads; agreed on a tagging + restricted-network design. Open item: 8% of legacy clients still on an old agent.', also: [10, 11] },
   { trr: 0, type: 'Chat', daysAgo: 2, note: 'Ping from Dana: wave 2 at 70% complete, smooth. Asked for exec-readout slides for their CIO next week — action on me.' },
   // Bluewater (1)
   { trr: 1, type: 'Meeting', daysAgo: 50, note: 'Discovery: 62 depots on aging routers, circuit costs rising 18% at renewal. Voice-quality complaints at 11 sites. Proposed a 5-site pilot with dual uplinks and LTE failover.' },
@@ -136,6 +185,13 @@ const ints: SeedInt[] = [
   { trr: 9, type: 'Meeting', daysAgo: 24, note: 'Config-management workshop: 11 device groups today, heavy shared-object sprawl. Proposed a hierarchy mirroring their region/site structure with shared policy sets for the 6 truly-common configs.' },
   { trr: 9, type: 'Call', daysAgo: 11, note: 'Walked through the config-drift report between running configs and the central platform. 23 diffs, mostly logging profiles. Elena wants weekly drift exports during the transition; agreed to schedule via API.' },
   { trr: 9, type: 'Email', daysAgo: 5, note: 'Sent the migration runbook draft: phase 1 read-only visibility, phase 2 policy authoring for one region, phase 3 cutover. Waiting on their change-board date.' },
+  // Meridian wave 2 (10)
+  { trr: 10, type: 'Meeting', daysAgo: 6, note: 'Wave 2 cutover runbook review with the app owners: scheduling system moves first weekend, lab integrations the second. Rollback point agreed at T+4h. Two interface engines need firewall changes filed by Tuesday.' },
+  { trr: 10, type: 'Call', daysAgo: 2, note: 'First weekend cutover done — scheduling system live in cloud, 0 sev-1 incidents, one slow report fixed by an index. Lab integrations on track for next weekend.' },
+  // Meridian quarantine (11) — only the linked readiness-review note; nothing new this week
+  // Bluewater LTE (12)
+  { trr: 12, type: 'POC', daysAgo: 15, note: 'Compared two carriers at the pilot depots: carrier B had better signal at 4 of 5 sites. APN design uses a private APN with per-depot static addressing.' },
+  { trr: 12, type: 'Email', daysAgo: 3, note: 'Sent the failover threshold proposal: fail to LTE after 3 lost probes at 1s, fail back after 60s stable. Marcus checking against their voice SLA.' },
 ];
 
 export function seedIfEmpty(): boolean {
@@ -143,23 +199,47 @@ export function seedIfEmpty(): boolean {
   if (n > 0) return false;
   const ids: string[] = [];
   const tx = db.transaction(() => {
-    for (const t of trrs) {
+    for (const [n, t] of trrs.entries()) {
       const id = uid() + ids.length;
       ids.push(id);
+      const { parent, ...fields } = t;
       insertTrr({
-        ...t, id,
+        ...fields, id, externalId: extIds[n] ?? '',
+        parentId: parent !== undefined ? ids[parent] : '',
         createdAt: iso(t.createdDaysAgo),
         lastContact: '', // set from interactions below
       });
     }
     for (const i of ints) {
+      const iid = uid() + Math.random().toString(36).slice(2, 5);
       insertInteraction({
-        id: uid() + Math.random().toString(36).slice(2, 5),
+        id: iid,
         trrId: ids[i.trr]!,
         type: i.type, date: day(i.daysAgo), note: i.note,
         aiExec: '', aiCust: '', sensitive: i.sensitive ?? false,
         createdAt: iso(i.daysAgo),
       });
+      if (i.also) setInteractionLinks(iid, i.also.map(n => ids[n]!));
+    }
+    // Opportunities (children follow their parent's opportunity on save).
+    for (const o of opps) {
+      const owner = getTrr(ids[o.trr]!)!;
+      const opp = insertOpportunity({
+        customerId: owner.customerId, name: o.name, stage: o.stage, rep: o.rep,
+        closeDate: day(-o.closeDaysAhead), notes: '', createdAt: iso(60),
+      });
+      for (const m of o.members) {
+        db.prepare('UPDATE trrs SET opportunity_id = ? WHERE id = ? OR parent_id = ?').run(opp.id, ids[m], ids[m]);
+      }
+    }
+    // Last cycle's posted updates.
+    const prevDue = addDays(cycleDueFor(localDay(), getSettings().updateDueWeekday), -7);
+    for (const u of postedLastCycle) {
+      const at = new Date(`${prevDue}T16:00:00`).toISOString();
+      const row = saveUpdateDraft({
+        trrId: ids[u.trr]!, cycleDue: prevDue, windowFrom: iso(14), windowTo: at, interactions: 1, text: u.text, model: '',
+      });
+      markUpdatePosted(row.id, at);
     }
     // last_contact = most recent interaction date per TRR
     for (const id of ids) {
@@ -198,6 +278,9 @@ export function seedIfEmpty(): boolean {
     // Track what we seeded so "Remove demo data" can surgically delete it later.
     db.prepare(`INSERT INTO settings (key, value) VALUES ('_seedTrrIds', ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(ids));
+    const custIds = [...new Set(ids.map(id => getTrr(id)!.customerId))];
+    db.prepare(`INSERT INTO settings (key, value) VALUES ('_seedCustomerIds', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(custIds));
   });
   tx();
   console.log(`Seeded ${trrs.length} TRs / ${ints.length} interactions`);

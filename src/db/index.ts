@@ -29,7 +29,7 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 // Versioned migrations. Each entry runs at most once, tracked in user_version.
-const migrations: string[] = [
+export const MIGRATIONS: readonly string[] = [
   // v1 — initial schema
   `
   CREATE TABLE trrs (
@@ -159,15 +159,103 @@ const migrations: string[] = [
        OR (t2.created_at = trrs.created_at AND t2.id <= trrs.id)
   );
   `,
+  // v6 — the request hierarchy and the weekly-update workflow (3.0.0).
+  // Customer -> Opportunity -> TR -> child TRs (one level). Purely additive:
+  // trrs.customer stays and is kept in sync with customers.name, so older code
+  // and the JSON API keep working and a rollback (old code + this DB) still reads.
+  // Existing free-text customers become customer rows (case/whitespace-folded).
+  `
+  CREATE TABLE customers (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    notes      TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE opportunities (
+    id          TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    stage       TEXT NOT NULL DEFAULT '',
+    rep         TEXT NOT NULL DEFAULT '',
+    close_date  TEXT NOT NULL DEFAULT '',
+    notes       TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX idx_opps_customer ON opportunities(customer_id);
+
+  ALTER TABLE trrs ADD COLUMN customer_id TEXT REFERENCES customers(id);
+  ALTER TABLE trrs ADD COLUMN opportunity_id TEXT REFERENCES opportunities(id) ON DELETE SET NULL;
+  ALTER TABLE trrs ADD COLUMN parent_id TEXT REFERENCES trrs(id) ON DELETE SET NULL;
+  ALTER TABLE trrs ADD COLUMN external_id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE trrs ADD COLUMN update_cadence TEXT NOT NULL DEFAULT '';
+  CREATE INDEX idx_trrs_customer ON trrs(customer_id);
+  CREATE INDEX idx_trrs_parent ON trrs(parent_id);
+
+  INSERT INTO customers (id, name, created_at)
+    SELECT lower(hex(randomblob(8))), trim(customer), min(created_at)
+    FROM trrs WHERE trim(customer) <> ''
+    GROUP BY lower(trim(customer));
+  UPDATE trrs SET customer_id = (
+    SELECT c.id FROM customers c WHERE c.name = trim(trrs.customer) COLLATE NOCASE
+  );
+  UPDATE trrs SET customer = (SELECT c.name FROM customers c WHERE c.id = trrs.customer_id)
+    WHERE customer_id IS NOT NULL;
+
+  ALTER TABLE interactions ADD COLUMN source TEXT NOT NULL DEFAULT '';
+
+  -- One log can cover several TRs (a call about three child requests).
+  CREATE TABLE interaction_links (
+    interaction_id TEXT NOT NULL REFERENCES interactions(id) ON DELETE CASCADE,
+    trr_id         TEXT NOT NULL REFERENCES trrs(id) ON DELETE CASCADE,
+    PRIMARY KEY (interaction_id, trr_id)
+  );
+  CREATE INDEX idx_links_trr ON interaction_links(trr_id);
+
+  -- Weekly updates: one per TR per cycle, drafted then posted.
+  CREATE TABLE updates (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    trr_id       TEXT NOT NULL REFERENCES trrs(id) ON DELETE CASCADE,
+    cycle_due    TEXT NOT NULL,
+    window_from  TEXT NOT NULL DEFAULT '',
+    window_to    TEXT NOT NULL DEFAULT '',
+    interactions INTEGER NOT NULL DEFAULT 0,
+    text         TEXT NOT NULL DEFAULT '',
+    model        TEXT NOT NULL DEFAULT '',
+    status       TEXT NOT NULL DEFAULT 'draft',
+    edited       INTEGER NOT NULL DEFAULT 0,
+    generated_at TEXT NOT NULL,
+    posted_at    TEXT NOT NULL DEFAULT ''
+  );
+  CREATE UNIQUE INDEX idx_updates_cycle ON updates(trr_id, cycle_due);
+
+  -- Summaries to date: versioned, never overwritten.
+  CREATE TABLE summaries (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_kind   TEXT NOT NULL,
+    scope_id     TEXT NOT NULL,
+    label        TEXT NOT NULL DEFAULT '',
+    interactions INTEGER NOT NULL DEFAULT 0,
+    first        TEXT NOT NULL DEFAULT '',
+    last         TEXT NOT NULL DEFAULT '',
+    through      TEXT NOT NULL DEFAULT '',
+    summary      TEXT NOT NULL,
+    model        TEXT NOT NULL DEFAULT '',
+    mode         TEXT NOT NULL DEFAULT 'full',
+    base_id      INTEGER,
+    generated_at TEXT NOT NULL
+  );
+  CREATE INDEX idx_summaries_scope ON summaries(scope_kind, scope_id, generated_at);
+  `,
 ];
 
-export const MIGRATION_COUNT = migrations.length;
+export const MIGRATION_COUNT = MIGRATIONS.length;
 
 export function migrate(): void {
   const current = db.pragma('user_version', { simple: true }) as number;
-  for (let v = current; v < migrations.length; v++) {
+  for (let v = current; v < MIGRATIONS.length; v++) {
     db.transaction(() => {
-      db.exec(migrations[v]!);
+      db.exec(MIGRATIONS[v]!);
       db.pragma(`user_version = ${v + 1}`);
     })();
   }
