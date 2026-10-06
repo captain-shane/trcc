@@ -223,7 +223,9 @@ export function trrDetail(t: Trr, ints: Interaction[], s: Settings, digest: Stor
   const r = rag(t.lastContact, s);
   const meta: [string, string][] = [
     ['TR ID', t.externalId || '—'],
-    ['Last contact', t.lastContact ? `${t.lastContact} (${daysSince(t.lastContact)}d)` : 'Never'],
+    ['Last contact', t.activityVia
+      ? `${t.lastContact} (${daysSince(t.lastContact)}d) on child #${t.activityVia} · own: ${t.ownLastContact || 'never'}`
+      : t.lastContact ? `${t.lastContact} (${daysSince(t.lastContact)}d)` : 'Never'],
     ['Complexity', t.complexity],
     ['Contact', t.contact || '—'], ['Account rep', t.rep || '—'],
     ['Target close', t.targetClose || '—'], ['Created', t.createdAt.slice(0, 10)],

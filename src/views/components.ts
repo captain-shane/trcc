@@ -43,8 +43,8 @@ export function trrCard(t: Trr, ints: Interaction[], s: Settings, ctx: CardCtx =
   const last = ints[0];
   const kids = ctx.children ?? [];
   const txt = `#${t.num} ${t.externalId} ${t.customer} ${t.title} ${t.status} ${ctx.opp ?? ''} ${t.valueThemes.join(' ')} ${kids.map(k => `${k.externalId} ${k.title}`).join(' ')}`.toLowerCase();
-  const kr = kids.length ? worstRag(kids, s) : null;
-  const liveKids = kids.filter(k => !k.deactivated && !s.closedStatuses.includes(k.status)).length;
+  const openKids = kids.filter(k => !k.deactivated && !s.closedStatuses.includes(k.status));
+  const stalledKids = openKids.filter(k => rag(k.lastContact, s) === 'red').length;
   return `
   <a class="card trr-card rag-${r} ${t.deactivated ? 'deact' : ''} ${ctx.child ? 'child-card' : ''}" href="/trr/${esc(t.id)}"
      data-txt="${esc(txt)}" x-show="!q || $el.dataset.txt.includes(q.toLowerCase())">
@@ -62,13 +62,13 @@ export function trrCard(t: Trr, ints: Interaction[], s: Settings, ctx: CardCtx =
       </div>
       <div class="${ctx.child ? 'child-title' : 'muted'}">${esc(t.title)}</div>
       ${ctx.opp && !ctx.child ? `<div class="small muted2">◇ ${esc(ctx.opp)}</div>` : ''}
-      ${kids.length ? `<div class="small family-line">⬚ ${kids.length} child TR${kids.length === 1 ? '' : 's'} · ${liveKids} open${kr ? ` · worst <span class="rag-g-${kr}">${RAG_SYMBOL[kr]}</span> ${RAG_LABEL[kr]}` : ''}</div>` : ''}
+      ${kids.length ? `<div class="small family-line">⬚ ${kids.length} child TR${kids.length === 1 ? '' : 's'} · ${openKids.length} open${t.activityVia ? ` · latest activity on #${t.activityVia}` : ''}${stalledKids ? ` · <span class="rag-g-red">${RAG_SYMBOL.red}</span> ${stalledKids} stalled` : ''}</div>` : ''}
       ${t.valueThemes.length && !ctx.child ? `<div class="theme-row">${t.valueThemes.map(v => badge(v, 'theme')).join('')}</div>` : ''}
       ${last ? `<div class="small muted2">Last: ${esc(last.type)} · ${esc(last.date)} · ${esc(last.note.slice(0, 70))}${last.note.length > 70 ? '…' : ''}</div>` : ''}
       ${archiveCountdown(t, s)}
     </div>
     <div class="trr-card-side">
-      <div class="small" style="color:${RAG_COLOR[r]};font-weight:600">${t.lastContact ? `${daysSince(t.lastContact)}d ago` : 'No contact'}</div>
+      <div class="small" style="color:${RAG_COLOR[r]};font-weight:600">${t.lastContact ? `${daysSince(t.lastContact)}d ago${t.activityVia ? ` (#${t.activityVia})` : ''}` : 'No contact'}</div>
       <div class="small muted2">${esc(t.priority)} · ${ints.length} log${ints.length === 1 ? '' : 's'}</div>
     </div>
   </a>`;

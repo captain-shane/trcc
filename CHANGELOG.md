@@ -40,8 +40,14 @@ kept in sync — so existing data, settings, and templates carry over untouched.
   customer — versioned and incremental, run in the background with progress.
 - **Accounts** page and per-customer / per-opportunity pages, with customer
   rename, merge (for duplicate free-text names), and opportunity editing.
-- **Dashboard grouping**: families (parent with children, worst-child health
-  rolled up), by customer, or flat. Breadcrumbs on every TR.
+- **Parent health follows its children.** A parent TR carries the
+  project-management side (assignments, resourcing, coordination notes) while
+  the work is logged on its children, so its Green/Yellow/Red uses the most
+  recent contact across the family — any active child means the request is
+  being worked. The tooltip and card say which child carries it; children keep
+  their own health, and stalled children are still counted on the parent card.
+- **Dashboard grouping**: families (parent with its children), by customer, or
+  flat. Breadcrumbs on every TR.
 - **Inline edits** on the TR page (status, priority, outcome, role) and an
   in-page log form.
 - `TZ` in docker-compose so due days follow your calendar, not UTC.

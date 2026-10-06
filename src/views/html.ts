@@ -27,10 +27,11 @@ export const RAG_SYMBOL: Record<Rag, string> = {
 /** Human-readable health explanation for a tooltip: state, recency, and the rule. */
 export function ragTitle(r: Rag, t: Trr, s: Settings): string {
   const contact = t.lastContact ? `${daysSince(t.lastContact)}d since last contact` : 'never contacted';
+  const via = t.activityVia ? ` — latest activity on child #${t.activityVia}` : '';
   const rule = r === 'green' ? `≤ ${s.greenDays}d`
     : r === 'yellow' ? `${s.greenDays + 1}–${s.yellowDays}d`
     : `> ${s.yellowDays}d`;
-  return `${RAG_LABEL[r]} — ${contact} (health threshold: ${rule})`;
+  return `${RAG_LABEL[r]} — ${contact}${via} (health threshold: ${rule})`;
 }
 
 /**

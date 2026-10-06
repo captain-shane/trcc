@@ -88,6 +88,22 @@ describe('hierarchy', () => {
     expect(() => repo.updateTrr(p.id, { parentId: p.id })).toThrow(/own parent/);
   });
 
+  it('a parent shows as actively worked when any child is, without changing stored data', () => {
+    const old = new Date(Date.now() - 20 * 86_400_000).toISOString().slice(0, 10);
+    const fresh = new Date(Date.now() - 1 * 86_400_000).toISOString().slice(0, 10);
+    const p = base({ customer: 'Roll Co', title: 'pm parent' }); repo.insertTrr(p);
+    repo.updateTrr(p.id, { lastContact: old });
+    const c = base({ customer: 'Roll Co', title: 'busy child', parentId: p.id }); repo.insertTrr(c);
+    repo.updateTrr(c.id, { lastContact: fresh });
+    const [view] = repo.withFamilyActivity([repo.getTrr(p.id)!]);
+    expect(view!.lastContact).toBe(fresh);
+    expect(view!.ownLastContact).toBe(old);
+    expect(view!.activityVia).toBe(repo.getTrr(c.id)!.num);
+    expect(repo.getTrr(p.id)!.lastContact).toBe(old); // stored value untouched
+    const [kid] = repo.withFamilyActivity([repo.getTrr(c.id)!]);
+    expect(kid!.activityVia).toBeUndefined();          // children keep their own health
+  });
+
   it('deleting a parent keeps its children as standalone TRs', () => {
     const p = base({ title: 'doomed parent' }); repo.insertTrr(p);
     const c = base({ title: 'survivor', parentId: p.id }); repo.insertTrr(c);
