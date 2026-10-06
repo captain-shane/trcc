@@ -55,8 +55,8 @@ forward-only, and idempotent, so restarting on the same or newer code is safe.
 ## Upgrading to 3.0
 
 3.0 adds schema v6 (customers, opportunities, parent/child TRs, weekly updates,
-summaries). It is additive and runs automatically at boot, but it is
-forward-only, so **take the step-1 backup** — rolling back to 2.x means
+summaries) and v7 (imports). Both are additive and run automatically at boot, but
+they are forward-only, so **take the step-1 backup** — rolling back to 2.x means
 restoring it. After the upgrade:
 
 - `/healthz` reports `version: 3.0.0` and the same `trrs` / `interactions`
