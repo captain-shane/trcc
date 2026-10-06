@@ -61,6 +61,11 @@ restoring it. After the upgrade:
 
 - `/healthz` reports `version: 3.0.0` and the same `trrs` / `interactions`
   counts as before, plus `customers` and `opportunities`.
+- The dashboard offers the **2.x restructure** (also under Settings → Data):
+  give an example of your TR IDs (e.g. `TRR123123`), tick the fields to search,
+  review, and apply. Each TR gets its TR ID, its title becomes an opportunity,
+  and every opportunity gets a parent TR over its requests. It can be undone
+  from Import → Recent imports. Take the step-1 backup before running it too.
 - Every existing TR has a customer record. Check **Accounts** for duplicates
   that differed by more than case or spacing ("Acme" vs "Acme Corp") and use
   **Merge** on the customer page.

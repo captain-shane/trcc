@@ -1044,7 +1044,7 @@ export interface ImportRecord {
   id: string;
   createdAt: string;
   status: 'draft' | 'applied' | 'undone';
-  kind: 'table' | 'freeform';
+  kind: 'table' | 'freeform' | 'migration';
   label: string;
   raw: string;
   tableJson: string;
@@ -1096,6 +1096,16 @@ export function updateImport(id: string, patch: Partial<Pick<ImportRecord, 'stat
 
 export function deleteImport(id: string): void {
   db.prepare(`DELETE FROM imports WHERE id = ? AND status <> 'applied'`).run(id);
+}
+
+/** 'pending' after an upgrade from 2.x until the migration wizard is applied or dismissed. */
+export function v2UpgradeState(): string {
+  const r = db.prepare(`SELECT value FROM settings WHERE key = '_v2Upgrade'`).get() as { value: string } | undefined;
+  return r?.value ?? '';
+}
+
+export function setV2UpgradeState(v: 'pending' | 'done' | 'dismissed'): void {
+  db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('_v2Upgrade', ?)`).run(v);
 }
 
 export function findTrrByExternalId(externalId: string): Trr | null {

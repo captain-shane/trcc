@@ -976,7 +976,7 @@ export function undoImport(id: string): { summary: string; kept: string[] } {
     for (const u of [...res.updated].reverse()) {
       if (!repo.getTrr(u.id)) continue;
       repo.updateTrr(u.id, u.before);
-      repo.recordHistory(u.id, 'import undone', '', `import ${localDay(rec.appliedAt)}`);
+      repo.recordHistory(u.id, rec.kind === 'migration' ? 'restructure undone' : 'import undone', '', `${rec.kind === 'migration' ? '2.x restructure' : 'import'} ${localDay(rec.appliedAt)}`);
       restored++;
     }
     for (const st of res.stages) if (repo.getOpportunity(st.id)) repo.updateOpportunity(st.id, { stage: st.before });
@@ -1002,5 +1002,6 @@ export function undoImport(id: string): { summary: string; kept: string[] } {
   const summary = `undone: ${removed} TR${removed === 1 ? '' : 's'} removed, ${restored} restored, ${res.logs.length} log${res.logs.length === 1 ? '' : 's'} removed`
     + (kept.length ? ` — kept ${kept.join(', ')} (activity added after the import)` : '');
   repo.updateImport(id, { status: 'undone', undoneAt: new Date().toISOString(), summary });
+  if (rec.kind === 'migration') repo.setV2UpgradeState('pending'); // the wizard is offered again
   return { summary, kept };
 }

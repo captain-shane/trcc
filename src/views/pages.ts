@@ -3,6 +3,7 @@ import { COMPLEXITIES, PRIORITIES, daysSince, rag, type Rag } from '../types.js'
 import type { Desk, DeskRow } from '../services/updates.js';
 import { WEEKDAYS, addDays, daysBetween, localDay, shortDay } from '../services/cycle.js';
 import type { PeriodDigest } from '../services/digest.js';
+import { migrateBanner } from './migrate.js';
 import type { SearchHit } from '../services/search.js';
 import { RAG_COLOR, RAG_LABEL, RAG_SYMBOL, esc, md2html, page, priorityBadge, ragDot, statusBadge, badge } from './html.js';
 import {
@@ -37,6 +38,7 @@ export interface DashCtx {
   customers: Map<string, Customer>;
   kids: Map<string, Trr[]>;       // parentId -> children (all active TRs)
   updatesDue: number;              // due + overdue on the current cycle
+  v2Pending?: boolean;             // upgraded from 2.x and the restructure wizard not yet run
   cycleDue: string;
 }
 
@@ -275,6 +277,7 @@ export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: str
       <div class="tile-label">${ctx.updatesDue ? '▲' : '●'} Updates due ${esc(shortDay(ctx.cycleDue))}</div>
     </a>
   </div>
+  ${ctx.v2Pending ? migrateBanner() : ''}
   ${backlogBanner(backlog, s.aiEnabled)}
   <div x-data="{q:''}">
     <div class="row dash-tools">
@@ -1320,6 +1323,8 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
         <button class="btn btn-outline danger" type="submit">💣 Erase ALL data</button>
       </form>
       <a class="btn btn-outline" href="/api/export" download="trcc-export.json">📤 JSON export</a>
+      <a class="btn btn-outline" href="/import">⇪ Import</a>
+      <a class="btn btn-outline" href="/migrate" title="One-time: fill TR IDs, build opportunities and parents from 2.x-style flat TRs">🧭 2.x restructure</a>
     </div>
   </div>
 

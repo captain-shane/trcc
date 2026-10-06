@@ -46,6 +46,15 @@ kept in sync — so existing data, settings, and templates carry over untouched.
   recent contact across the family — any active child means the request is
   being worked. The tooltip and card say which child carries it; children keep
   their own health, and stalled children are still counted on the parent card.
+- **2.x restructure wizard** (one-time; offered on the dashboard after an
+  upgrade from 2.x, and under Settings → Data). In 2.x each TR was one request
+  whose title named the opportunity. The wizard asks what your TR IDs look
+  like (an example such as `TRR123123`, or a shape it found in your data) and
+  which fields to search, then fills each TR's TR ID, makes its title an
+  opportunity under its customer, and creates one parent TR per opportunity
+  with the requests as its children. Titles are kept, every TR ID can be
+  corrected and every TR left out in the preview, and the whole step can be
+  undone.
 - **Import from a paste** (⇪ Import, top right): copy rows out of Google Sheets
   (or CSV / a Markdown table) and paste. Columns are matched by header name and,
   with AI on, the local model suggests the mapping from the headers and five

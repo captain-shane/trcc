@@ -459,3 +459,16 @@ details[open] > summary { margin-bottom: 8px; }
 .imp-apply { margin: 10px 0 16px; gap: 8px; }
 .imp-raw { max-height: 320px; overflow: auto; white-space: pre; font-size: 12px; }
 .imp-item-head input[type=checkbox] { width: auto; margin: 0; }
+
+/* 2.x restructure wizard */
+.mig-ex-row { margin: 8px 0; gap: 6px; }
+.mig-step { display: block; margin-top: 12px; }
+.mig-group { border: 1px solid var(--c2); border-radius: 8px; padding: 6px 8px; margin-top: 8px; }
+.mig-head { font-size: 13px; padding: 2px 2px 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mig-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 4px 4px 18px; border-top: 1px dashed var(--c2); font-size: 12.5px; }
+.mig-row input[type=checkbox] { width: auto; margin: 0; }
+.mig-title { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.mig-id { width: 150px; padding: 3px 6px; font-size: 12px; }
+.mig-src { width: 90px; }
+.mig-warn { flex-basis: 100%; padding-left: 22px; }
+@media (max-width: 520px) { .mig-title { max-width: 100%; flex-basis: 70%; } .mig-src { width: auto; } }

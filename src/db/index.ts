@@ -282,6 +282,12 @@ export function migrate(): void {
       db.pragma(`user_version = ${v + 1}`);
     })();
   }
+  // A 2.x database tracked each request as a flat TR. Offer the one-time
+  // wizard that fills TR IDs and builds opportunities + parents (services/migrate2.ts).
+  if (current > 0 && current < 6) {
+    const n = (db.prepare('SELECT count(*) n FROM trrs').get() as { n: number }).n;
+    if (n > 0) db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('_v2Upgrade', 'pending')`).run();
+  }
 }
 
 migrate();
