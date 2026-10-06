@@ -258,7 +258,8 @@ describe('flagged logs never reach a model', () => {
     const { buildContext } = await import('../src/services/review.js');
     const { computePeriodDigest } = await import('../src/services/digest.js');
     const t = base({ customer: 'Flag Co', title: 'f' }); repo.insertTrr(t);
-    const secret = 'SECRET-PAYLOAD official merger codename bluebird, long enough to be backfilled';
+    // carries the flavor's official-record tag (main: official, palo-alto: sfdc)
+    const secret = `SECRET-PAYLOAD ${repo.getSettings().officialTag} merger codename bluebird, long enough to be backfilled`;
     const fid = log(t.id, 1, secret);
     repo.updateInteraction(fid, { sensitive: true });
     log(t.id, 1, 'ordinary note that is fine to summarise for the record');
