@@ -186,3 +186,12 @@ describe('plan, apply, undo', () => {
     expect(plan.items[0]!.action).toBe('skipped');
   });
 });
+
+describe('mapping sanity', () => {
+  it('reads a stage column with no opportunity as status', () => {
+    const t = imp.parseTable('TR ID\tStage\nTR-1\tOpen\nTR-2\tWon')!;
+    expect(imp.sanitize(t, ['trId', 'oppStage'])).toEqual(['trId', 'status']);
+    const t2 = imp.parseTable('TR ID\tOpp\tStage\nTR-1\tBig deal\tProposal\nTR-2\tBig deal\tProposal')!;
+    expect(imp.sanitize(t2, ['trId', 'opportunity', 'oppStage'])).toEqual(['trId', 'opportunity', 'oppStage']);
+  });
+});

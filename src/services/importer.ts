@@ -224,7 +224,10 @@ function share(t: ParsedTable, col: number, pred: (v: string) => boolean): numbe
 /** One column per field (notes excepted); a "date" column that is mostly not dates is not a date. */
 export function sanitize(t: ParsedTable, m: FieldKey[]): FieldKey[] {
   const seen = new Set<FieldKey>();
-  return m.map((k, c) => {
+  // a stage with no opportunity to belong to is where the request stands
+  const input = m.includes('oppStage') && !m.includes('opportunity') && !m.includes('status')
+    ? m.map(k => (k === 'oppStage' ? 'status' : k)) : m;
+  return input.map((k, c) => {
     if (!FIELD_KEYS.has(k)) return 'ignore';
     if (DATE_FIELDS.has(k) && t.rows.length && share(t, c, v => !!parseDate(v)) < 0.5) {
       return /update|note|comment|activity|progress/i.test(t.headers[c] ?? '') && !seen.has('logNote') ? 'logNote' : 'ignore';
@@ -241,8 +244,15 @@ function extractJson(text: string): unknown {
   return JSON.parse(text.slice(a, b + 1));
 }
 
-function fieldGuide(): string {
-  return FIELDS.filter(f => f.key !== 'ignore').map(f => `- ${f.key}: ${f.hint}`).join('\n');
+/** Field list for prompts; with settings, the operator's own value lists are shown so values can be recognised. */
+function fieldGuide(s?: Settings): string {
+  const vocab: Partial<Record<FieldKey, readonly string[]>> = s
+    ? { status: s.statuses, myRole: s.roles, outcome: s.outcomes, themes: s.themes, priority: PRIORITIES, complexity: COMPLEXITIES, logType: INTERACTION_TYPES }
+    : {};
+  return FIELDS.filter(f => f.key !== 'ignore').map(f => {
+    const v = vocab[f.key];
+    return `- ${f.key}: ${f.hint}${v ? ` (values like: ${v.join(', ')})` : ''}`;
+  }).join('\n');
 }
 
 const SAMPLE_ROWS = 5;
@@ -258,13 +268,13 @@ export async function aiMapping(t: ParsedTable, s: Settings): Promise<{ mapping:
 Hierarchy: customer -> opportunity -> request (TR) -> child requests. A row is either one request, or one dated log entry about a request.
 
 FIELDS:
-${fieldGuide()}
+${fieldGuide(s)}
 - ignore: fits none of the above
 
 COLUMNS (index: header — sample values):
 ${cols}
 
-Rules: each field at most once, except logNote (several note columns may all be logNote). A free-text notes/updates column is logNote, not description, unless it clearly describes the request itself. Prefer "ignore" over guessing.
+Rules: each field at most once, except logNote (several note columns may all be logNote). A free-text notes/updates column is logNote, not description, unless it clearly describes the request itself. Where a request stands (open, in progress, won…) is status; oppStage is only a sales stage of an opportunity. Prefer "ignore" over guessing.
 Answer with JSON only, no prose: {"columns": {"0": "<field>", "1": "<field>", ...}}`;
   const text = await generate(prompt, s.model, 120_000, s.fastCtxTokens);
   const parsed = extractJson(text) as { columns?: Record<string, string> };
@@ -298,7 +308,7 @@ export async function aiExtract(text: string, s: Settings, progress: (p: JobProg
 Hierarchy: customer -> opportunity -> request (TR) -> child requests.
 
 FIELDS:
-${fieldGuide()}
+${fieldGuide(s)}
 
 Rules:
 - One object per log entry (a dated note, call, email, update). Repeat the request's fields (trId, customer, title…) on each of its entries.
