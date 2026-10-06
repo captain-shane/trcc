@@ -59,6 +59,8 @@ export function statusBadge(s: string): string {
 
 const NAV = [
   ['/', 'Dashboard'],
+  ['/accounts', 'Accounts'],
+  ['/updates', 'Update Desk'],
   ['/archive', 'Archive'],
   ['/digests', 'Digests'],
   ['/stats', 'Stats'],
@@ -82,7 +84,7 @@ export function page(title: string, active: string, content: string): string {
 </head>
 <body hx-boost="true">
 <header class="topbar">
-  <a class="brand" href="/">🎯 <span>TR Command Center</span> <small>v2</small></a>
+  <a class="brand" href="/">🎯 <span>TR Command Center</span> <small>v${APP_VERSION.split('.')[0]}</small></a>
   <div class="topbar-actions">
     <a class="btn" href="/trr/new">+ New TR</a>
     <a class="btn btn-outline" href="/settings" title="Settings">⚙️</a>

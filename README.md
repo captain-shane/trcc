@@ -31,15 +31,33 @@ Built on three principles:
 
 ## Features
 
-- **Dashboard** — Green/Yellow/Red health per TR from last-contact age,
-  short `#N` handles, instant filter box, deactivation with archive countdown
+- **Request hierarchy** — Customer → Opportunity → TR → child TRs. Each TR
+  carries its upstream **TR ID**; a child inherits its parent's customer and
+  opportunity. One log can apply to several TRs (a call covering three child
+  requests is recorded once and shows on all three)
+- **Dashboard** — Green/Yellow/Red health per TR from last-contact age, grouped
+  as families (parent + children, worst-child health rolled up), by customer,
+  or flat; short `#N` handles and TR IDs, instant filter box, deactivation with
+  archive countdown
+- **Accounts** — the customer → opportunity → TR tree, with rename/merge for
+  duplicate customer names and per-level pages
+- **Update Desk** — every TR ID owes an update each cycle (default: every
+  Thursday). Shows what is overdue, due, drafted, posted, or quiet; drafts
+  combine everything logged **since that TR's last posted update** into one
+  status (AI or plain), editable before posting; one block to copy/paste into
+  your tracking system, and "Mark posted" records it on the TR
+- **Summary to date** — on demand for a TR, a parent + its children, an
+  opportunity, or a customer. Versioned (every run kept) and incremental: later
+  runs revise the previous summary with only what is new
+- **Inline editing** — status, priority, outcome, and role change in place on
+  the TR page; logging happens without leaving it
 - **Interaction log** — paste raw notes of any size (calls, meetings,
   transcripts); the local model produces customer-facing versions and terse
   exec summaries on demand, with an auto-backfill scheduler for the backlog
 - **Audit trail** — every change to status/complexity/priority/role/outcome/
   themes is recorded automatically; each TR shows its full shift history
-- **Catch-me-up digests** — per-TR AI summary, cached, auto-generated on
-  archival, listed on the Digests page
+- **Catch-me-up digests** — per-TR AI summary (the TR-level summary to date),
+  auto-generated on archival, listed on the Digests page
 - **Period reports** — deterministic portfolio stats for any date range +
   optional AI narrative; every narrative run is saved to the Reports page
 - **Review engine** — ask up to 10 free-form questions ("where could I have
@@ -48,7 +66,7 @@ Built on three principles:
   for self-evals / 6-month reviews / retros
 - **Search** — instant FTS5 text search plus semantic search over notes via
   local-model embeddings (in-page explainer covers when to use which)
-- **Weekly report** — copy-paste-ready stakeholder update
+- **Activity snapshot** — last-7-days plain-text roll-up on the Reports page
 
 ## Quick start
 
@@ -82,6 +100,7 @@ npm test
 | `AI_DIGEST_MODEL` | `gemma4:26b` | Quality model: digests, reports, reviews (falls back to the fast model on GPU OOM) |
 | `AI_EMBED_MODEL` | `nomic-embed-text` | Embeddings for semantic search |
 | `SEED_ON_EMPTY` | `true` | Seed demo data when the database is empty |
+| `TZ` | `UTC` | Time zone for update due days (e.g. `America/New_York`) — set it so "Thursday" means your Thursday |
 
 Everything else is configured **in the GUI** under ⚙️ Settings.
 

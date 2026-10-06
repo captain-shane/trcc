@@ -40,7 +40,12 @@ export const DEFAULT_ARCHIVED_STATUS = 'Archived';
 export interface Trr {
   id: string;
   num: number;           // short human-friendly handle (#1, #42), auto-assigned
-  customer: string;
+  customer: string;      // display name — kept in sync with customers.name (compat + rollback)
+  customerId: string;    // customers.id
+  opportunityId: string; // opportunities.id or '' (unassigned)
+  parentId: string;      // parent TR id or '' — ONE level only (a parent cannot itself have a parent)
+  externalId: string;    // the request's ID in the upstream system ("TR ID"), '' if none
+  updateCadence: UpdateCadence | ''; // '' = default: Settings cadence, or 'none' for a parent that has children
   title: string;
   status: string;        // domain = settings.statuses (user-editable)
   complexity: Complexity;
@@ -60,14 +65,78 @@ export interface Trr {
 
 export interface Interaction {
   id: string;
-  trrId: string;
+  trrId: string;         // owning TR; a log can also be LINKED to more TRs (interaction_links)
   type: InteractionType;
   date: string;          // ISO date
   note: string;
   aiExec: string;        // generated exec summary ('' = none yet)
   aiCust: string;        // generated customer-facing version
   sensitive: boolean;
+  source: string;        // '' = logged by the user; 'update' = auto-logged record of a posted weekly update
   createdAt: string;
+}
+
+/** Fields a caller may leave out when creating a TR — resolved by the repo. */
+export type NewTrr = Omit<Trr, 'num' | 'customerId' | 'opportunityId' | 'parentId' | 'externalId' | 'updateCadence'>
+  & Partial<Pick<Trr, 'customerId' | 'opportunityId' | 'parentId' | 'externalId' | 'updateCadence'>>;
+
+export type NewInteraction = Omit<Interaction, 'source'> & { source?: string };
+
+export interface Customer {
+  id: string;
+  name: string;
+  notes: string;
+  createdAt: string;
+}
+
+export interface Opportunity {
+  id: string;
+  customerId: string;
+  name: string;
+  stage: string;
+  rep: string;
+  closeDate: string;     // ISO date or ''
+  notes: string;
+  createdAt: string;
+}
+
+export const UPDATE_CADENCES = ['weekly', 'biweekly', 'none'] as const;
+export type UpdateCadence = (typeof UPDATE_CADENCES)[number];
+export const CADENCE_DAYS: Record<UpdateCadence, number> = { weekly: 7, biweekly: 14, none: 0 };
+
+/** One weekly (per-cycle) update for one TR ID. */
+export interface TrUpdate {
+  id: number;
+  trrId: string;
+  cycleDue: string;      // ISO date of the due day this update answers
+  windowFrom: string;    // ISO datetime — activity after this point is "new" ('' = cadence look-back)
+  windowTo: string;      // ISO datetime — when the window was last computed / posted
+  interactions: number;  // entries in the window when generated
+  text: string;
+  model: string;         // '' = deterministic or hand-written
+  status: 'draft' | 'posted';
+  edited: boolean;       // the user changed the text by hand
+  generatedAt: string;
+  postedAt: string;
+}
+
+export type SummaryScopeKind = 'trr' | 'family' | 'opportunity' | 'customer';
+
+/** A versioned "summary to date" for a scope. Never overwritten — each run is kept. */
+export interface ScopeSummary {
+  id: number;
+  scopeKind: SummaryScopeKind;
+  scopeId: string;
+  label: string;
+  interactions: number;  // entries covered (cumulative)
+  first: string;
+  last: string;
+  through: string;       // createdAt of the newest entry covered — the incremental anchor
+  summary: string;
+  model: string;
+  mode: 'full' | 'incremental';
+  baseId: number | null;
+  generatedAt: string;
 }
 
 export interface StoredDigest {
@@ -120,6 +189,12 @@ export interface Settings {
   // Review forms repeat every cycle (midyear/EoY, year after year), so the
   // question list is worth saving once rather than retyping each time.
   questionSets: { name: string; questions: string[] }[];
+  // Weekly updates (Update Desk)
+  updateDueWeekday: number;      // 0=Sun … 6=Sat; default 4 (Thursday)
+  updateCadence: UpdateCadence;  // default cadence for TRs that don't set their own
+  logPostedUpdates: boolean;     // posting an update also logs it as an official-record note
+  updateTmpl: string;    // weekly update: combine the entries in the window into one status
+  summaryTmpl: string;   // summary to date (full or incremental) for a TR / family / opportunity / customer
   custTmpl: string;
   execTmpl: string;
   evalTmpl: string;

@@ -1,15 +1,24 @@
 import { Router } from 'express';
 import * as repo from '../db/repo.js';
 import * as views from '../views/pages.js';
-import { interactionCard, digestBlock, errorBox } from '../views/components.js';
+import { interactionCard, digestBlock, errorBox, jobProgress, summaryBlock, trrLinksFragment, updateRowCard } from '../views/components.js';
+import { formCtx } from './pages.js';
+import { HierarchyError } from '../db/repo.js';
+import { getJob } from '../services/jobs.js';
+import { planSummary, startSummaryJob } from '../services/summary.js';
+import {
+  aggregateText, buildDesk, deskCounts, deskRow, draftUpdate, plainDraft, postUpdate,
+  saveDraftText, startBulkDrafts, unpostUpdate,
+} from '../services/updates.js';
+import { isValidDay } from '../services/cycle.js';
 import { enrichExecSummaries, periodDigest, queueArchivalDigest, trrDigest } from '../services/digest.js';
 import { planReview } from '../services/review.js';
 import { getReviewJob, startReview } from '../services/reviewJob.js';
 import { fillTemplate, generate } from '../services/ai.js';
 import { semanticSearch, textSearch } from '../services/search.js';
 import {
-  COMPLEXITIES, INTERACTION_TYPES, PRIORITIES,
-  uid, type Interaction, type Settings, type Trr,
+  COMPLEXITIES, INTERACTION_TYPES, PRIORITIES, UPDATE_CADENCES,
+  uid, type Interaction, type NewTrr, type Settings, type SummaryScopeKind, type Trr,
 } from '../types.js';
 import { esc } from '../views/html.js';
 
@@ -39,10 +48,17 @@ function themesFromForm(v: unknown, domain: string[]): string[] {
   return domain.filter(t => raw.includes(t));
 }
 
-function trrFromForm(body: Record<string, unknown>, s: Settings, existing?: Trr): Omit<Trr, 'num'> {
+function trrFromForm(body: Record<string, unknown>, s: Settings, existing?: Trr): NewTrr & Pick<Trr, 'customerId' | 'opportunityId' | 'parentId' | 'externalId' | 'updateCadence'> {
+  const customer = str(body.customer, 200);
   return {
     id: existing?.id ?? uid(),
-    customer: str(body.customer, 200),
+    customer,
+    // typing a different customer name moves the TR; the repo resolves / creates it
+    customerId: existing && existing.customer.toLowerCase() === customer.toLowerCase() ? existing.customerId : '',
+    opportunityId: str(body.opportunityId, 64),
+    parentId: str(body.parentId, 64),
+    externalId: str(body.externalId, 100),
+    updateCadence: pickOrEmpty(body.updateCadence, [...UPDATE_CADENCES]) as Trr['updateCadence'],
     title: str(body.title, 300),
     status: pickStr(body.status, s.statuses, existing?.status ?? s.statuses[0] ?? 'New'),
     complexity: pick(body.complexity, COMPLEXITIES, existing?.complexity ?? 'Simple'),
@@ -63,24 +79,73 @@ function trrFromForm(body: Record<string, unknown>, s: Settings, existing?: Trr)
 
 // --- TRR CRUD ---------------------------------------------------------------
 
+/** "+ New opportunity…" in the TR form: create it under the TR's customer first. */
+function resolveNewOpportunity(t: { customer: string; opportunityId: string; parentId: string }, body: Record<string, unknown>): void {
+  if (t.opportunityId !== '__new') return;
+  t.opportunityId = '';
+  const name = str(body.newOpportunity, 200);
+  if (!name || t.parentId) return; // a child takes its parent's opportunity anyway
+  const cust = repo.ensureCustomer(t.customer);
+  t.opportunityId = repo.insertOpportunity({ customerId: cust.id, name, stage: '', rep: '', closeDate: '', notes: '' }).id;
+}
+
 actions.post('/trr', (req, res) => {
-  const t = trrFromForm(req.body as Record<string, unknown>, repo.getSettings());
-  if (!t.customer || !t.title) return res.status(400).send(views.notFound());
-  repo.insertTrr(t);
+  const b = req.body as Record<string, unknown>;
+  const s = repo.getSettings();
+  const t = trrFromForm(b, s);
+  if (!t.customer || !t.title) return res.status(400).send(views.newTrrPage(s, t, { ...formCtx(t.customer), error: 'Customer and title are required.' }));
+  try {
+    resolveNewOpportunity(t, b);
+    repo.insertTrr(t);
+  } catch (e) {
+    if (!(e instanceof HierarchyError)) throw e;
+    return res.status(400).send(views.newTrrPage(s, t, { ...formCtx(t.customer), error: e.message }));
+  }
   res.redirect(303, `/trr/${t.id}`);
 });
+
+function maybeArchivalDigest(s: Settings, before: Trr, afterStatus: string): void {
+  // Newly archived → auto-generate + store a catch-up digest in the background.
+  if (s.aiEnabled && afterStatus === s.archivedStatus && before.status !== s.archivedStatus) {
+    queueArchivalDigest(before.id);
+  }
+}
 
 actions.post('/trr/:id', (req, res) => {
   const existing = repo.getTrr(req.params.id);
   if (!existing) return res.status(404).send(views.notFound());
   const s = repo.getSettings();
-  const t = trrFromForm(req.body as Record<string, unknown>, s, existing);
-  repo.updateTrr(existing.id, t);
-  // Newly archived → auto-generate + store a catch-up digest in the background.
-  if (s.aiEnabled && t.status === s.archivedStatus && existing.status !== s.archivedStatus) {
-    queueArchivalDigest(existing.id);
+  const b = req.body as Record<string, unknown>;
+  const t = trrFromForm(b, s, existing);
+  try {
+    resolveNewOpportunity(t, b);
+    repo.updateTrr(existing.id, t);
+  } catch (e) {
+    if (!(e instanceof HierarchyError)) throw e;
+    return res.status(400).send(views.editTrrPage(existing, s, { ...formCtx(t.customer, existing.id), error: e.message }, t));
   }
+  maybeArchivalDigest(s, existing, t.status);
   res.redirect(303, `/trr/${existing.id}`);
+});
+
+// Inline edits from the TR page — one field, saved on change.
+const QUICK_FIELDS = ['status', 'priority', 'outcome', 'myRole'] as const;
+actions.post('/trr/:id/quick', (req, res) => {
+  const t = repo.getTrr(req.params.id);
+  if (!t) return res.status(404).send('');
+  const s = repo.getSettings();
+  const b = req.body as Record<string, unknown>;
+  const key = QUICK_FIELDS.find(k => b[k] !== undefined);
+  if (!key) return res.send(views.quickControls(t, s));
+  const v = String(b[key]);
+  const domain: Record<typeof key, string[]> = {
+    status: s.statuses, priority: [...PRIORITIES], outcome: ['', ...s.outcomes], myRole: ['', ...s.roles],
+  };
+  if (!domain[key].includes(v)) return res.send(views.quickControls(t, s));
+  repo.updateTrr(t.id, { [key]: v } as Partial<Trr>);
+  if (key === 'status') maybeArchivalDigest(s, t, v);
+  res.setHeader('HX-Trigger', 'trr-changed');
+  res.send(views.quickControls(repo.getTrr(t.id)!, s, `${key === 'myRole' ? 'role' : key} saved`));
 });
 
 actions.post('/trr/:id/delete', (req, res) => {
@@ -115,10 +180,15 @@ actions.post('/trr/:id/interactions', (req, res) => {
     note: str(b.note, 500_000),
     aiExec: '', aiCust: '',
     sensitive: b.sensitive === 'on' || b.sensitive === '1',
+    source: '',
     createdAt: new Date().toISOString(),
   };
   repo.insertInteraction(i);
-  if (!t.lastContact || i.date > t.lastContact) repo.updateTrr(t.id, { lastContact: i.date });
+  repo.setInteractionLinks(i.id, formList(b.alsoTrr));
+  for (const id of [t.id, ...repo.interactionLinks(i.id)]) {
+    const x = repo.getTrr(id);
+    if (x && (!x.lastContact || i.date > x.lastContact)) repo.updateTrr(x.id, { lastContact: i.date });
+  }
   // fire-and-forget: enrich new substantive notes with exec summaries
   if (repo.getSettings().aiEnabled) {
     enrichExecSummaries(4).catch(e => console.warn('auto-enrich:', (e as Error).message));
@@ -136,6 +206,7 @@ actions.post('/interactions/:id/update', (req, res) => {
     note: str(b.note, 500_000),
     sensitive: b.sensitive === 'on' || b.sensitive === '1',
   });
+  repo.setInteractionLinks(i.id, formList(b.alsoTrr));
   res.redirect(303, `/trr/${i.trrId}`);
 });
 
@@ -302,6 +373,7 @@ actions.post('/settings/templates/reset', (_req, res) => {
   repo.saveSettings({
     custTmpl: d.custTmpl, execTmpl: d.execTmpl, evalTmpl: d.evalTmpl,
     trrDigestTmpl: d.trrDigestTmpl, reviewTmpl: d.reviewTmpl, reviewMapTmpl: d.reviewMapTmpl,
+    updateTmpl: d.updateTmpl, summaryTmpl: d.summaryTmpl,
   });
   res.redirect(303, '/settings');
 });
@@ -441,6 +513,199 @@ actions.post('/settings', (req, res) => {
     trrDigestTmpl: str(b.trrDigestTmpl, 50_000) || cur.trrDigestTmpl,
     reviewTmpl: str(b.reviewTmpl, 50_000) || cur.reviewTmpl,
     reviewMapTmpl: str(b.reviewMapTmpl, 50_000) || cur.reviewMapTmpl,
+    updateDueWeekday: Math.min(6, num(b.updateDueWeekday, cur.updateDueWeekday, 0)),
+    updateCadence: pickStr(b.updateCadence, [...UPDATE_CADENCES], cur.updateCadence) as Settings['updateCadence'],
+    logPostedUpdates: b.logPostedUpdates === '1',
+    updateTmpl: str(b.updateTmpl, 50_000) || cur.updateTmpl,
+    summaryTmpl: str(b.summaryTmpl, 50_000) || cur.summaryTmpl,
   });
   res.redirect(303, '/settings');
+});
+
+// --- Customers & opportunities ------------------------------------------------
+
+function hierarchyGuard(res: import('express').Response, fn: () => void, back: string): void {
+  try {
+    fn();
+    res.redirect(303, back);
+  } catch (e) {
+    if (!(e instanceof HierarchyError)) throw e;
+    res.status(400).send(views.messagePage('Could not save', e.message, back));
+  }
+}
+
+actions.post('/customers', (req, res) => {
+  const name = str((req.body as Record<string, unknown>).name, 200);
+  if (!name) return res.redirect(303, '/accounts');
+  const c = repo.ensureCustomer(name);
+  res.redirect(303, `/customer/${c.id}`);
+});
+
+actions.post('/customer/:id', (req, res) => {
+  const b = req.body as Record<string, unknown>;
+  hierarchyGuard(res, () => repo.updateCustomer(req.params.id, { name: str(b.name, 200), notes: str(b.notes, 5_000) }), `/customer/${req.params.id}`);
+});
+
+actions.post('/customer/:id/merge', (req, res) => {
+  const into = str((req.body as Record<string, unknown>).into, 64);
+  if (!repo.getCustomer(into)) return res.redirect(303, `/customer/${req.params.id}`);
+  repo.mergeCustomer(req.params.id, into);
+  res.redirect(303, `/customer/${into}`);
+});
+
+actions.post('/customer/:id/delete', (req, res) => {
+  const ok = repo.deleteCustomer(req.params.id);
+  res.redirect(303, ok ? '/accounts' : `/customer/${req.params.id}`);
+});
+
+actions.post('/customer/:id/opps', (req, res) => {
+  const b = req.body as Record<string, unknown>;
+  let id = '';
+  try {
+    id = repo.insertOpportunity({
+      customerId: req.params.id, name: str(b.name, 200), stage: str(b.stage, 100),
+      rep: str(b.rep, 200), closeDate: str(b.closeDate, 10), notes: '',
+    }).id;
+  } catch (e) {
+    if (!(e instanceof HierarchyError)) throw e;
+    return res.status(400).send(views.messagePage('Could not add opportunity', e.message, `/customer/${req.params.id}`));
+  }
+  res.redirect(303, `/opp/${id}`);
+});
+
+actions.post('/opp/:id', (req, res) => {
+  const b = req.body as Record<string, unknown>;
+  repo.updateOpportunity(req.params.id, {
+    name: str(b.name, 200), stage: str(b.stage, 100), rep: str(b.rep, 200),
+    closeDate: str(b.closeDate, 10), notes: str(b.notes, 5_000),
+  });
+  res.redirect(303, `/opp/${req.params.id}`);
+});
+
+actions.post('/opp/:id/delete', (req, res) => {
+  const o = repo.getOpportunity(req.params.id);
+  repo.deleteOpportunity(req.params.id);
+  res.redirect(303, o ? `/customer/${o.customerId}` : '/accounts');
+});
+
+/** TR form: opportunity + parent choices for whatever customer is typed. */
+actions.get('/fragments/trr-form/links', (req, res) => {
+  const customer = str(req.query.customer, 200);
+  const trr = str(req.query.trr, 64);
+  const ctx = formCtx(customer, trr || undefined);
+  res.send(trrLinksFragment({ opportunityId: str(req.query.opportunityId, 64), parentId: str(req.query.parentId, 64) }, ctx));
+});
+
+// --- Summaries to date ------------------------------------------------------------
+
+const SCOPE_KINDS: SummaryScopeKind[] = ['trr', 'family', 'opportunity', 'customer'];
+
+actions.post('/summaries/:kind/:id', (req, res) => {
+  if (!repo.getSettings().aiEnabled) return res.send(AI_OFF_MSG);
+  const kind = SCOPE_KINDS.find(k => k === req.params.kind);
+  if (!kind) return res.status(404).send('');
+  const full = req.query.full === '1';
+  const plan = planSummary(kind, req.params.id, full);
+  if (!plan) return res.send(errorBox('That scope no longer exists.'));
+  if (plan.mode === 'up-to-date') {
+    return res.send('<div class="small hl" role="status">✓ Already up to date — nothing new has been logged since the latest version. Use “Full rebuild” to regenerate anyway.</div>');
+  }
+  const jobId = startSummaryJob(kind, req.params.id, full);
+  const job = getJob(jobId)!;
+  res.send(jobProgress(job, `/fragments/summary-job/${jobId}?pid=${encodeURIComponent(`sum-${kind}-${req.params.id}`)}`));
+});
+
+actions.get('/fragments/summary-job/:id', (req, res) => {
+  const job = getJob(String(req.params.id));
+  const pid = str(req.query.pid, 120).replace(/[^\w-]/g, '');
+  if (!job) return res.send(errorBox('That run is no longer tracked (the server may have restarted). Finished summaries are saved — reload the page.'));
+  if (job.status === 'error') return res.send(errorBox(`Summary failed: ${job.error ?? 'unknown error'}`));
+  if (job.status === 'running') return res.send(jobProgress(job, `/fragments/summary-job/${job.id}?pid=${encodeURIComponent(pid)}`));
+  const sum = repo.getSummary(Number(job.result));
+  if (!sum) return res.send(errorBox('Summary finished but could not be loaded — reload the page.'));
+  res.send(`<div id="${pid}-out" hx-swap-oob="innerHTML">${summaryBlock(sum)}</div>
+    <div class="small hl" role="status">✓ New version saved (${sum.mode}). Earlier versions are kept — reload to see the list.</div>`);
+});
+
+// --- Update Desk ---------------------------------------------------------------
+
+function cycleParam(v: unknown): string | undefined {
+  const c = str(v, 10);
+  return isValidDay(c) ? c : undefined;
+}
+
+function sendRow(res: import('express').Response, trrId: string, cycleDue: string, opts: { flash?: string; error?: string; edit?: boolean } = {}): void {
+  const row = deskRow(trrId, cycleDue);
+  res.setHeader('HX-Trigger', 'desk-changed');
+  if (!row) return void res.send(errorBox(opts.error ?? 'This TR is no longer on the desk for that cycle.'));
+  const desk = buildDesk(cycleDue);
+  res.send(updateRowCard(row, cycleDue, repo.getSettings().aiEnabled && desk.current, opts));
+}
+
+actions.post('/updates/:trrId/:cycle/draft', async (req, res) => {
+  const cycle = cycleParam(req.params.cycle);
+  if (!cycle) return res.status(400).send('');
+  try {
+    await draftUpdate(req.params.trrId, cycle, { useAi: req.query.plain !== '1' });
+    sendRow(res, req.params.trrId, cycle, { flash: 'draft saved' });
+  } catch (e) {
+    sendRow(res, req.params.trrId, cycle, { error: `Draft failed: ${(e as Error).message}` });
+  }
+});
+
+actions.post('/updates/:trrId/:cycle/text', (req, res) => {
+  const cycle = cycleParam(req.params.cycle);
+  if (!cycle) return res.status(400).send('');
+  if (!repo.getTrr(req.params.trrId)) return res.status(404).send('');
+  let text = str((req.body as Record<string, unknown>).text, 20_000);
+  const isNew = !repo.getUpdate(req.params.trrId, cycle);
+  if (!text && isNew) {
+    const row = deskRow(req.params.trrId, cycle);
+    text = row ? plainDraft(row) : '';
+  }
+  saveDraftText(req.params.trrId, cycle, text);
+  sendRow(res, req.params.trrId, cycle, isNew ? { edit: true } : { flash: 'saved' });
+});
+
+actions.post('/updates/u/:id/post', (req, res) => {
+  const u = postUpdate(Number(req.params.id));
+  if (!u) return res.status(404).send('');
+  sendRow(res, u.trrId, u.cycleDue, { flash: 'posted' });
+});
+
+actions.post('/updates/u/:id/unpost', (req, res) => {
+  const u = repo.getUpdateById(Number(req.params.id));
+  if (!u) return res.status(404).send('');
+  unpostUpdate(u.id);
+  sendRow(res, u.trrId, u.cycleDue, { flash: 'back to draft' });
+});
+
+actions.post('/updates/bulk', (req, res) => {
+  if (!repo.getSettings().aiEnabled) return res.send(AI_OFF_MSG);
+  const cycle = cycleParam(req.query.cycle) ?? buildDesk().cycleDue;
+  const jobId = startBulkDrafts(cycle, { redoStale: req.query.stale === '1' });
+  res.send(jobProgress(getJob(jobId)!, `/fragments/updates/job/${jobId}`));
+});
+
+actions.get('/fragments/updates/job/:id', (req, res) => {
+  const job = getJob(String(req.params.id));
+  if (!job) return res.send(errorBox('That run is no longer tracked — drafts that finished are saved. Reload the page.'));
+  if (job.status === 'running') return res.send(jobProgress(job, `/fragments/updates/job/${job.id}`));
+  if (job.status === 'error') return res.send(errorBox(`Bulk drafting failed: ${job.error ?? 'unknown error'}`));
+  const r = job.result as { drafted: number; failed: string[] };
+  res.setHeader('HX-Refresh', 'true'); // every row changed — reload the desk
+  res.send(`<div class="small hl">✓ Drafted ${r.drafted}.${r.failed.length ? ` Failed: ${esc(r.failed.join('; '))}` : ''}</div>`);
+});
+
+actions.post('/updates/post-all', (req, res) => {
+  const cycle = cycleParam(req.query.cycle) ?? buildDesk().cycleDue;
+  for (const r of buildDesk(cycle).rows) {
+    if (r.update?.status === 'draft' && r.update.text.trim()) postUpdate(r.update.id);
+  }
+  res.redirect(303, `/updates?cycle=${cycle}`);
+});
+
+actions.get('/fragments/updates/summary', (req, res) => {
+  const desk = buildDesk(cycleParam(req.query.cycle));
+  res.send(views.deskSummaryFragment(desk, deskCounts(desk), aggregateText(desk)));
 });

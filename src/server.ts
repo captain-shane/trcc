@@ -80,7 +80,7 @@ setTimeout(maybeAutoBackup, 60_000); // shortly after boot
 
 app.listen(config.port, () => {
   const c = counts();
-  console.log(`TR Command Center v2 on :${config.port}`);
+  console.log(`TR Command Center v${APP_VERSION} on :${config.port}`);
   console.log(`  db:     ${config.dbPath} (${c.trrs} TRRs / ${c.interactions} interactions)`);
   console.log(`  local models: ${config.aiUrl}`);
 });

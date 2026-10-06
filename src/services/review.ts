@@ -41,7 +41,7 @@ const CHARS_PER_TOKEN = 3.2;
 const NOTE_CHARS = 1_400;
 const CALL_TIMEOUT = 480_000;
 
-function usableChars(tokens: number, reserve: number): number {
+export function usableChars(tokens: number, reserve: number): number {
   return Math.max(2_000, Math.floor((tokens - reserve) * CHARS_PER_TOKEN));
 }
 

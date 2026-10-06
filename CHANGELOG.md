@@ -10,6 +10,52 @@ that a user can observe are **minor**, not patch.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-06
+
+The data model grows a hierarchy, and weekly reporting becomes a workflow.
+**Major** because the core model changes and the schema migration (v6) is
+forward-only: going back to 2.x code means restoring a pre-upgrade backup.
+The migration is additive — no column is dropped, `trrs.customer` is kept and
+kept in sync — so existing data, settings, and templates carry over untouched.
+
+### Added
+- **Customer → Opportunity → TR → child TRs.** Customers become records
+  (existing free-text names are folded case- and whitespace-insensitively;
+  the earliest spelling wins). Opportunities group TRs per customer. A TR can
+  have child TRs — one level — and a child always inherits its parent's
+  customer and opportunity.
+- **TR ID** on every TR: the request's number in your upstream system.
+- **One log, several TRs.** "Also applies to" links an interaction to related
+  TRs; it shows on each, updates each one's last contact, and counts toward
+  each one's weekly update.
+- **Update Desk** (`/updates`). Due day (default Thursday) and default cadence
+  in Settings, per-TR override (weekly / every two weeks / none). States:
+  overdue, due, draft ready, posted, not due — each with its own shape, never
+  colour alone. The window for an update is everything logged since that TR's
+  last *posted* update, so a missed week rolls forward. AI or plain drafts,
+  hand edits, "Draft all missing" in the background, one paste-ready block for
+  the whole cycle with a list of who is missing, "Mark posted" (optionally
+  logged as an official-record note), and past cycles to see who never got one.
+- **Summary to date** for a TR, a parent + children, an opportunity, or a
+  customer — versioned and incremental, run in the background with progress.
+- **Accounts** page and per-customer / per-opportunity pages, with customer
+  rename, merge (for duplicate free-text names), and opportunity editing.
+- **Dashboard grouping**: families (parent with children, worst-child health
+  rolled up), by customer, or flat. Breadcrumbs on every TR.
+- **Inline edits** on the TR page (status, priority, outcome, role) and an
+  in-page log form.
+- `TZ` in docker-compose so due days follow your calendar, not UTC.
+- API: `/api/updates` (the desk as JSON), `/api/customers`; `/api/export` now
+  includes customers, opportunities, links, updates, and summaries.
+
+### Changed
+- The Reports page's weekly text moved behind the Update Desk; a last-7-days
+  activity snapshot remains there.
+- The TR page's "Catch me up" panel is now the TR-level summary to date
+  (it still writes the digest shown on the Digests page).
+- A parent TR that has children is left off the Update Desk by default — it
+  reports through its children — unless it sets its own cadence.
+
 ## [2.2.0] - 2026-08-08
 
 ### Added

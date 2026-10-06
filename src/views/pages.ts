@@ -1,11 +1,13 @@
-import type { Interaction, Settings, StoredDigest, Trr, TrrHistoryEntry } from '../types.js';
+import type { Customer, Interaction, Opportunity, ScopeSummary, Settings, StoredDigest, Trr, TrrHistoryEntry } from '../types.js';
 import { COMPLEXITIES, PRIORITIES, daysSince, rag } from '../types.js';
+import type { Desk, DeskRow } from '../services/updates.js';
+import { WEEKDAYS, addDays, daysBetween, localDay, shortDay } from '../services/cycle.js';
 import type { PeriodDigest } from '../services/digest.js';
 import type { SearchHit } from '../services/search.js';
 import { RAG_COLOR, RAG_LABEL, RAG_SYMBOL, esc, md2html, page, priorityBadge, ragDot, statusBadge, badge } from './html.js';
 import {
-  archiveCountdown, digestBlock, field, hbar, interactionCard, interactionForm,
-  statTile, trrCard, trrForm,
+  DESK_STATE, archiveCountdown, breadcrumbs, deskStateBadge, digestBlock, field, hbar, interactionCard, interactionForm,
+  select, statTile, summaryPanel, trId, trIdBadge, trrCard, trrForm, updateRowCard, worstRag, type TrrFormCtx,
 } from './components.js';
 
 type IntsByTrr = Map<string, Interaction[]>;
@@ -29,7 +31,16 @@ function backlogBanner(backlog: number, aiEnabled: boolean): string {
   </div>`;
 }
 
-export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: string, backlog: number): string {
+export interface DashCtx {
+  group: 'family' | 'customer' | 'flat';
+  opps: Map<string, Opportunity>;
+  customers: Map<string, Customer>;
+  kids: Map<string, Trr[]>;       // parentId -> children (all active TRs)
+  updatesDue: number;              // due + overdue on the current cycle
+  cycleDue: string;
+}
+
+export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: string, backlog: number, ctx: DashCtx): string {
   const live = trrs.filter(t => !t.deactivated);
   const ct = { red: 0, yellow: 0, green: 0 };
   for (const t of live) ct[rag(t.lastContact, s)]++;
@@ -41,17 +52,69 @@ export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: str
       ? trrs.filter(t => !t.deactivated && rag(t.lastContact, s) === filter)
       : trrs;
 
-  const sorted = [...filtered].sort((a, b) => {
+  const order = { red: 0, yellow: 1, green: 2 };
+  const byHealth = (a: Trr, b: Trr) => {
     if (a.deactivated !== b.deactivated) return a.deactivated ? 1 : -1;
-    const order = { red: 0, yellow: 1, green: 2 };
     return order[rag(a.lastContact, s)] - order[rag(b.lastContact, s)];
-  });
+  };
+  const sorted = [...filtered].sort(byHealth);
+  const oppName = (t: Trr) => (t.opportunityId ? ctx.opps.get(t.opportunityId)?.name : undefined);
+  const qs = (k: string, v: string) => {
+    const p = new URLSearchParams({ f: filter, g: ctx.group, [k]: v });
+    if (p.get('f') === 'all') p.delete('f');
+    if (p.get('g') === 'family') p.delete('g');
+    const str = p.toString();
+    return str ? `/?${str}` : '/';
+  };
 
   const tile = (k: string, label: string, count: number, color: string) => `
-    <a class="tile tile-link ${filter === k ? 'active' : ''}" href="${k === 'all' ? '/' : `/?f=${k}`}">
+    <a class="tile tile-link ${filter === k ? 'active' : ''}" href="${qs('f', k)}">
       <div class="tile-value" style="color:${color}">${count}</div>
       <div class="tile-label">${label}</div>
     </a>`;
+
+  // Family view: parents carry their children; a child whose parent is not in
+  // the current list (closed, or filtered out) is shown on its own.
+  const familyCards = (list: Trr[], opts: { showCustomer?: boolean } = {}) => {
+    const ids = new Set(list.map(t => t.id));
+    return list.filter(t => !t.parentId || !ids.has(t.parentId)).map(t => {
+      const kids = (ctx.kids.get(t.id) ?? []).filter(k => ids.has(k.id));
+      return `<div class="family">${trrCard(t, ints.get(t.id) ?? [], s, { opp: oppName(t), children: ctx.kids.get(t.id) ?? [] })}
+        ${kids.map(k => trrCard(k, ints.get(k.id) ?? [], s, { child: true, showCustomer: opts.showCustomer })).join('')}</div>`;
+    }).join('');
+  };
+
+  let body: string;
+  const useFamily = ctx.group !== 'flat' && filter === 'all';
+  if (ctx.group === 'customer') {
+    const groups = new Map<string, Trr[]>();
+    for (const t of sorted) {
+      const k = t.customerId || t.customer;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(t);
+    }
+    body = [...groups.entries()]
+      .sort((a, b) => (a[1][0]!.customer).localeCompare(b[1][0]!.customer))
+      .map(([cid, list]) => {
+        const c = ctx.customers.get(cid);
+        const wr = worstRag(list, s);
+        return `<section class="cust-group" data-txt="${esc(list.map(t => `#${t.num} ${t.externalId} ${t.customer} ${t.title}`).join(' ').toLowerCase())}"
+          x-show="!q || $el.dataset.txt.includes(q.toLowerCase())">
+          <div class="cust-head row-between">
+            <a href="${c ? `/customer/${esc(c.id)}` : '#'}"><strong>${esc(list[0]!.customer)}</strong></a>
+            <span class="small muted2">${list.length} TR${list.length === 1 ? '' : 's'}${wr ? ` · worst <span class="rag-g-${wr}">${RAG_SYMBOL[wr]}</span>` : ''}</span>
+          </div>
+          <div class="trr-grid">${filter === 'all' ? familyCards(list) : list.map(t => trrCard(t, ints.get(t.id) ?? [], s, { opp: oppName(t) })).join('')}</div>
+        </section>`;
+      }).join('');
+  } else if (useFamily) {
+    body = `<div class="trr-grid">${familyCards(sorted, { showCustomer: false })}</div>`;
+  } else {
+    body = `<div class="trr-grid">${sorted.map(t => trrCard(t, ints.get(t.id) ?? [], s, { opp: oppName(t) })).join('')}</div>`;
+  }
+
+  const gbtn = (g: DashCtx['group'], label: string) =>
+    `<a class="seg ${ctx.group === g ? 'active' : ''}" href="${qs('g', g)}">${label}</a>`;
 
   return page('Dashboard', '/', `
   <div class="tiles">
@@ -60,14 +123,21 @@ export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: str
     ${tile('green', `${RAG_SYMBOL.green} Active`, ct.green, 'var(--green)')}
     ${tile('deact', 'Deactivated', deact, 'var(--muted2)')}
     ${tile('all', 'Total', trrs.length, 'var(--text)')}
+    <a class="tile tile-link" href="/updates" title="Weekly updates due ${esc(ctx.cycleDue)}">
+      <div class="tile-value" style="color:${ctx.updatesDue ? 'var(--yellow)' : 'var(--green)'}">${ctx.updatesDue}</div>
+      <div class="tile-label">${ctx.updatesDue ? '▲' : '●'} Updates due ${esc(shortDay(ctx.cycleDue))}</div>
+    </a>
   </div>
   ${backlogBanner(backlog, s.aiEnabled)}
   <div x-data="{q:''}">
-    <input class="list-filter" x-model="q" placeholder="🔍 Filter by #, customer, title, status, theme…">
-    ${sorted.length === 0 ? '<div class="card muted center">No TRs match.</div>' : ''}
-    <div class="trr-grid">
-      ${sorted.map(t => trrCard(t, ints.get(t.id) ?? [], s)).join('')}
+    <div class="row dash-tools">
+      <input class="list-filter" x-model="q" placeholder="🔍 Filter by #, TR ID, customer, title, status, theme…">
+      <div class="segmented" role="group" aria-label="Group by">
+        ${gbtn('family', 'Families')}${gbtn('customer', 'By customer')}${gbtn('flat', 'Flat')}
+      </div>
     </div>
+    ${sorted.length === 0 ? '<div class="card muted center">No TRs match.</div>' : ''}
+    ${body}
   </div>
   `);
 }
@@ -87,35 +157,115 @@ function historyTimeline(history: TrrHistoryEntry[]): string {
     </div>`).join('')}</div>`;
 }
 
-export function trrDetail(t: Trr, ints: Interaction[], s: Settings, digest: StoredDigest | null, history: TrrHistoryEntry[]): string {
+export interface DetailCtx {
+  customer: Customer | null;
+  opp: Opportunity | null;
+  parent: Trr | null;
+  children: Trr[];
+  related: Trr[];                     // same-customer TRs a log can also apply to
+  owners: Map<string, Trr>;           // TR by id, for "logged on #n" badges
+  links: Map<string, string[]>;       // interactionId -> linked TR ids
+  includeChildren: boolean;           // parent timeline merges children's logs
+  summaries: { trr: ScopeSummary[]; family: ScopeSummary[] };
+  deskRow: DeskRow | null;            // this TR on the current cycle's desk
+  cycleDue: string;
+  updates: import('../types.js').TrUpdate[];
+}
+
+/** Inline status / priority / outcome controls — saved on change, no page load. */
+export function quickControls(t: Trr, s: Settings, flash = ''): string {
+  const sel = (name: string, options: readonly string[], value: string, empty?: string) =>
+    `<label class="field"><span class="field-label">${esc(name === 'myRole' ? 'my role' : name)}</span>
+      <select name="${name}" hx-post="/trr/${esc(t.id)}/quick" hx-trigger="change" hx-target="#trr-quick" hx-swap="outerHTML" hx-include="this">
+        ${empty !== undefined ? `<option value="" ${value === '' ? 'selected' : ''}>${esc(empty)}</option>` : ''}
+        ${options.map(o => `<option ${o === value ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+      </select></label>`;
+  return `
+  <div class="card quick" id="trr-quick">
+    <div class="row-between"><h3 style="margin:0">Quick edit</h3>${flash ? `<span class="small hl" role="status">✓ ${esc(flash)}</span>` : ''}</div>
+    <div class="grid2 quick-grid">
+      ${sel('status', s.statuses, t.status)}
+      ${sel('priority', PRIORITIES, t.priority)}
+      ${sel('outcome', s.outcomes, t.outcome, '—')}
+      ${sel('myRole', s.roles, t.myRole, '—')}
+    </div>
+  </div>`;
+}
+
+function childrenCard(t: Trr, kids: Trr[], s: Settings): string {
+  return `
+  <div class="card">
+    <div class="row-between"><h3 style="margin:0">Child TRs (${kids.length})</h3>
+      ${t.parentId ? '' : `<a class="btn btn-sm" href="/trr/new?parent=${esc(t.id)}">+ Child TR</a>`}</div>
+    ${kids.length === 0 ? '<div class="small muted2">None yet. A child TR inherits this request\'s customer and opportunity.</div>' : ''}
+    ${kids.map(k => {
+      const r = rag(k.lastContact, s);
+      return `<a class="child-row" href="/trr/${esc(k.id)}"><span class="rag-glyph rag-g-${r}">${RAG_SYMBOL[r]}</span>
+        <span class="trr-num">#${k.num}</span>${trIdBadge(k)}<span class="child-title">${esc(k.title)}</span>${statusBadge(k.status)}</a>`;
+    }).join('')}
+  </div>`;
+}
+
+function updatesCard(t: Trr, ctx: DetailCtx, aiEnabled: boolean): string {
+  const posted = ctx.updates.filter(u => u.status === 'posted');
+  return `
+  <details class="card" ${ctx.deskRow && ctx.deskRow.state !== 'posted' && ctx.deskRow.state !== 'not-due' ? 'open' : ''}>
+    <summary><strong>🗓 Weekly update</strong> <span class="small muted2">— cycle due ${esc(shortDay(ctx.cycleDue))}${ctx.deskRow ? ` · ${DESK_STATE[ctx.deskRow.state].label}` : ' · not on the desk'}</span></summary>
+    ${ctx.deskRow ? updateRowCard(ctx.deskRow, ctx.cycleDue, aiEnabled) : `<div class="small muted2">${t.parentId || !ctx.children.length ? 'This TR is closed, deactivated, or set to no weekly update.' : 'Parents with children report through their children by default (set a cadence on this TR to include it).'}</div>`}
+    ${posted.length ? `<details class="small"><summary class="muted2">Posted updates (${posted.length})</summary>
+      ${posted.map(u => `<div class="upd-hist"><div class="muted2">cycle ${esc(u.cycleDue)} · posted ${esc(u.postedAt.slice(0, 10))}</div><pre class="report-pre">${esc(u.text)}</pre></div>`).join('')}
+    </details>` : ''}
+    <div class="small"><a class="hl" href="/updates">Open the Update Desk →</a></div>
+  </details>`;
+}
+
+export function trrDetail(t: Trr, ints: Interaction[], s: Settings, digest: StoredDigest | null, history: TrrHistoryEntry[], ctx: DetailCtx): string {
   const r = rag(t.lastContact, s);
   const meta: [string, string][] = [
-    ['Status', t.status], ['Complexity', t.complexity], ['Priority', t.priority],
+    ['TR ID', t.externalId || '—'],
     ['Last contact', t.lastContact ? `${t.lastContact} (${daysSince(t.lastContact)}d)` : 'Never'],
-    ['My role', t.myRole || '—'], ['Outcome', t.outcome || '—'],
+    ['Complexity', t.complexity],
     ['Contact', t.contact || '—'], ['Account rep', t.rep || '—'],
     ['Target close', t.targetClose || '—'], ['Created', t.createdAt.slice(0, 10)],
+    ['Weekly update', t.updateCadence || `default`],
     ['Deactivated', t.deactivated ? `Yes — since ${t.deactivatedAt.slice(0, 10)}` : 'No'],
   ];
-  return page(t.customer, '/', `
-  <a class="btn btn-outline btn-sm" href="/">← Back</a>
+  const crumbs = breadcrumbs([
+    { href: '/accounts', label: 'Accounts' },
+    ...(ctx.customer ? [{ href: `/customer/${ctx.customer.id}`, label: ctx.customer.name }] : [{ label: t.customer }]),
+    ...(ctx.opp ? [{ href: `/opp/${ctx.opp.id}`, label: ctx.opp.name }] : []),
+    ...(ctx.parent ? [{ href: `/trr/${ctx.parent.id}`, label: `${trId(ctx.parent)} ${ctx.parent.title}` }] : []),
+    { label: `${trId(t)} ${t.title}` },
+  ]);
+  const isParent = ctx.children.length > 0;
+  const intCard = (i: Interaction) => interactionCard(i, {
+    aiEnabled: s.aiEnabled,
+    owner: i.trrId !== t.id ? ctx.owners.get(i.trrId) : undefined,
+    linkedTo: (ctx.links.get(i.id) ?? []).filter(id => id !== t.id).map(id => ctx.owners.get(id)).filter((x): x is Trr => !!x),
+  });
+  return page(`${trId(t)} ${t.customer}`, '/', `
+  ${crumbs}
   <div class="card" style="border-left:3px solid ${RAG_COLOR[r]}">
     <div class="row-between wrap">
       <div>
         <div class="row">
           ${ragDot(r, t, s)}
           <span class="trr-num">#${t.num}</span>
+          ${trIdBadge(t)}
           <strong class="lg">${esc(t.customer)}</strong>
           ${badge(`${RAG_SYMBOL[r]} ${RAG_LABEL[r]}`, `rag-b-${r}`)}
           ${statusBadge(t.status)}
           ${priorityBadge(t.priority)}
+          ${isParent ? badge(`parent · ${ctx.children.length} child${ctx.children.length === 1 ? '' : 'ren'}`, 'cx') : ''}
+          ${ctx.parent ? `<a class="badge cx" href="/trr/${esc(ctx.parent.id)}">child of #${ctx.parent.num}</a>` : ''}
         </div>
         <div class="muted">${esc(t.title)}</div>
         ${t.valueThemes.length ? `<div class="theme-row">${t.valueThemes.map(v => badge(v, 'theme')).join('')}</div>` : ''}
         ${archiveCountdown(t, s)}
       </div>
       <div class="row wrap">
-        <a class="btn" href="/trr/${esc(t.id)}/log">+ Log interaction</a>
+        <a class="btn" href="#quicklog" onclick="document.getElementById('quicklog').open=true">+ Log</a>
+        ${t.parentId ? '' : `<a class="btn btn-outline" href="/trr/new?parent=${esc(t.id)}">+ Child TR</a>`}
         <a class="btn btn-outline" href="/trr/${esc(t.id)}/edit">✏️ Edit</a>
         <form method="post" action="/trr/${esc(t.id)}/toggle-active" style="display:inline">
           <button class="btn btn-outline ${t.deactivated ? '' : 'danger'}" type="submit">
@@ -127,12 +277,26 @@ export function trrDetail(t: Trr, ints: Interaction[], s: Settings, digest: Stor
 
   <div class="detail-layout">
     <div class="detail-main">
-      <h3>Interactions (${ints.length})</h3>
+      <details class="card" id="quicklog">
+        <summary><strong>+ Log interaction</strong></summary>
+        ${interactionForm(t.id, undefined, ctx.related, [], { bare: true })}
+      </details>
+      <div class="row-between wrap">
+        <h3>Interactions (${ints.length})</h3>
+        ${isParent ? `<div class="segmented" role="group" aria-label="Timeline scope">
+          <a class="seg ${ctx.includeChildren ? 'active' : ''}" href="/trr/${esc(t.id)}">With children</a>
+          <a class="seg ${ctx.includeChildren ? '' : 'active'}" href="/trr/${esc(t.id)}?own=1">This TR only</a></div>` : ''}
+      </div>
       ${ints.length === 0 ? '<div class="card muted center">No interactions yet.</div>' : ''}
-      ${ints.map(i => interactionCard(i, { aiEnabled: s.aiEnabled })).join('')}
+      ${ints.map(intCard).join('')}
     </div>
 
     <aside class="detail-side">
+      ${quickControls(t, s)}
+      ${isParent || !t.parentId ? childrenCard(t, ctx.children, s) : ''}
+      ${updatesCard(t, ctx, s.aiEnabled)}
+      ${isParent ? summaryPanel('family', t.id, ctx.summaries.family, s.aiEnabled) : ''}
+      ${summaryPanel('trr', t.id, ctx.summaries.trr, s.aiEnabled, { open: !isParent })}
       <div class="card">
         <h3>Details</h3>
         <div class="meta-grid side-meta">
@@ -141,25 +305,19 @@ export function trrDetail(t: Trr, ints: Interaction[], s: Settings, digest: Stor
         ${t.description ? `<hr><div class="muted small">${esc(t.description)}</div>` : ''}
       </div>
 
-      ${s.aiEnabled || digest ? `
-      <details class="card" ${digest ? 'open' : ''}>
-        <summary><strong>🧠 Catch me up</strong></summary>
-        <div id="trr-digest">
-          ${digest
-            ? digestBlock(digest, { cached: true })
-            : `<button class="btn btn-outline" hx-get="/fragments/trr-digest/${esc(t.id)}"
-                 hx-target="#trr-digest" hx-swap="innerHTML" hx-indicator="#dg-load">Generate digest</button>
-               <span id="dg-load" class="htmx-indicator small muted2">⏳ generating on local model (can take ~30s)…</span>`}
-        </div>
+      ${digest && !ctx.summaries.trr.length ? `
+      <details class="card">
+        <summary><strong>🧠 Earlier catch-up digest</strong></summary>
+        ${digestBlock(digest, { cached: true })}
       </details>` : ''}
 
-      <details class="card" open>
+      <details class="card">
         <summary><strong>📜 History</strong> <span class="small muted2">(${history.length})</span></summary>
         ${historyTimeline(history)}
       </details>
 
       <div class="card">
-        <form method="post" action="/trr/${esc(t.id)}/delete" onsubmit="return confirm('Delete this TR and all its interactions? This cannot be undone.')">
+        <form method="post" action="/trr/${esc(t.id)}/delete" onsubmit="return confirm('Delete this TR and all its interactions?${isParent ? ' Its child TRs are kept and become standalone.' : ''} This cannot be undone.')">
           <button class="btn btn-outline danger btn-sm" type="submit">Delete TR</button>
         </form>
       </div>
@@ -168,22 +326,270 @@ export function trrDetail(t: Trr, ints: Interaction[], s: Settings, digest: Stor
   `);
 }
 
-export function newTrrPage(s: Settings): string {
-  return page('New TR', '/', `<h2>New TR</h2>${trrForm({}, '/trr', 'Create TR', s)}`);
+export function newTrrPage(s: Settings, t: Partial<Trr>, ctx: TrrFormCtx): string {
+  const parent = t.parentId ? ` — child of ${esc(t.customer ?? '')}` : '';
+  return page('New TR', '/', `<h2>New TR${parent}</h2>${trrForm(t, '/trr', 'Create TR', s, ctx)}`);
 }
 
-export function editTrrPage(t: Trr, s: Settings): string {
-  return page(`Edit — ${t.customer}`, '/', `<h2>Edit TR</h2>${trrForm(t, `/trr/${esc(t.id)}`, 'Save', s)}`);
+export function editTrrPage(t: Trr, s: Settings, ctx: TrrFormCtx, draft?: Partial<Trr>): string {
+  return page(`Edit — ${t.customer}`, '/', `<h2>Edit TR</h2>${trrForm({ ...t, ...draft }, `/trr/${esc(t.id)}`, 'Save', s, ctx)}`);
 }
 
-export function logInteractionPage(t: Trr): string {
+export function logInteractionPage(t: Trr, related: Trr[] = []): string {
   return page(`Log — ${t.customer}`, '/', `
-    <h2>Log interaction — ${esc(t.customer)}</h2>${interactionForm(t.id)}`);
+    <h2>Log interaction — ${esc(t.customer)}</h2>${interactionForm(t.id, undefined, related)}`);
 }
 
-export function editInteractionPage(t: Trr, i: Interaction): string {
+export function editInteractionPage(t: Trr, i: Interaction, related: Trr[] = [], linked: string[] = []): string {
   return page(`Edit interaction — ${t.customer}`, '/', `
-    <h2>Edit interaction — ${esc(t.customer)}</h2>${interactionForm(t.id, i)}`);
+    <h2>Edit interaction — ${esc(t.customer)}</h2>${interactionForm(t.id, i, related, linked)}`);
+}
+
+// --- Accounts: Customer -> Opportunity -> TR tree ------------------------------
+
+function treeRows(list: Trr[], kids: Map<string, Trr[]>, s: Settings): string {
+  const ids = new Set(list.map(t => t.id));
+  const row = (t: Trr, child: boolean) => {
+    const r = rag(t.lastContact, s);
+    const closed = s.closedStatuses.includes(t.status);
+    return `<a class="tree-row ${child ? 'tree-child' : ''} ${closed || t.deactivated ? 'tree-closed' : ''}" href="/trr/${esc(t.id)}">
+      <span class="rag-glyph rag-g-${r}" aria-label="${esc(RAG_LABEL[r])}">${RAG_SYMBOL[r]}</span>
+      ${child ? '<span class="muted3" aria-hidden="true">↳</span>' : ''}
+      <span class="trr-num">#${t.num}</span>${trIdBadge(t)}
+      <span class="tree-title">${esc(t.title)}</span>${statusBadge(t.status)}
+      <span class="small muted2 tree-meta">${t.lastContact ? `${daysSince(t.lastContact)}d` : '—'}</span></a>`;
+  };
+  return list.filter(t => !t.parentId || !ids.has(t.parentId))
+    .sort((a, b) => a.num - b.num)
+    .map(t => row(t, false) + (kids.get(t.id) ?? []).filter(k => ids.has(k.id)).map(k => row(k, true)).join(''))
+    .join('');
+}
+
+export function accountsPage(customers: Customer[], trrs: Trr[], opps: Opportunity[], s: Settings): string {
+  const kids = new Map<string, Trr[]>();
+  for (const t of trrs) if (t.parentId) { if (!kids.has(t.parentId)) kids.set(t.parentId, []); kids.get(t.parentId)!.push(t); }
+  return page('Accounts', '/accounts', `
+  <div class="row-between wrap">
+    <h2>Accounts (${customers.length})</h2>
+    <form class="row" method="post" action="/customers"><input name="name" placeholder="New customer name" required style="width:220px"><button class="btn btn-sm" type="submit">+ Customer</button></form>
+  </div>
+  <div x-data="{q:''}">
+    <input class="list-filter" x-model="q" placeholder="🔍 Filter customers, opportunities, TR IDs…">
+    ${customers.length === 0 ? '<div class="card muted center">No customers yet — creating a TR creates its customer.</div>' : ''}
+    <div class="acct-grid">
+    ${customers.map(c => {
+      const ct = trrs.filter(t => t.customerId === c.id);
+      const open = ct.filter(t => !s.closedStatuses.includes(t.status) && !t.deactivated);
+      const co = opps.filter(o => o.customerId === c.id);
+      const wr = worstRag(ct, s);
+      const txt = `${c.name} ${co.map(o => o.name).join(' ')} ${ct.map(t => `${t.externalId} ${t.title}`).join(' ')}`.toLowerCase();
+      return `
+      <div class="card acct-card" data-txt="${esc(txt)}" x-show="!q || $el.dataset.txt.includes(q.toLowerCase())">
+        <div class="row-between">
+          <a href="/customer/${esc(c.id)}"><strong class="lg">${esc(c.name)}</strong></a>
+          <span class="small muted2">${wr ? `<span class="rag-g-${wr}">${RAG_SYMBOL[wr]}</span> ` : ''}${open.length}/${ct.length} open · ${co.length} opp${co.length === 1 ? '' : 's'}</span>
+        </div>
+        ${co.map(o => {
+          const ot = ct.filter(t => t.opportunityId === o.id && !s.closedStatuses.includes(t.status));
+          return `<div class="tree-opp"><a href="/opp/${esc(o.id)}">◇ ${esc(o.name)}</a>${o.stage ? ` <span class="small muted2">${esc(o.stage)}</span>` : ''}</div>${treeRows(ot, kids, s)}`;
+        }).join('')}
+        ${(() => {
+          const un = ct.filter(t => !t.opportunityId && !s.closedStatuses.includes(t.status));
+          return un.length ? `${co.length ? '<div class="tree-opp muted2">No opportunity</div>' : ''}${treeRows(un, kids, s)}` : '';
+        })()}
+        ${ct.length - ct.filter(t => !s.closedStatuses.includes(t.status)).length
+          ? `<a class="small muted2" href="/customer/${esc(c.id)}">+ ${ct.length - ct.filter(t => !s.closedStatuses.includes(t.status)).length} closed</a>` : ''}
+      </div>`;
+    }).join('')}
+    </div>
+  </div>`);
+}
+
+export function customerPage(c: Customer, all: Customer[], opps: Opportunity[], trrs: Trr[], s: Settings, versions: ScopeSummary[]): string {
+  const kids = new Map<string, Trr[]>();
+  for (const t of trrs) if (t.parentId) { if (!kids.has(t.parentId)) kids.set(t.parentId, []); kids.get(t.parentId)!.push(t); }
+  const un = trrs.filter(t => !t.opportunityId);
+  return page(c.name, '/accounts', `
+  ${breadcrumbs([{ href: '/accounts', label: 'Accounts' }, { label: c.name }])}
+  <div class="card" x-data="{edit:false}">
+    <div class="row-between wrap">
+      <div x-show="!edit"><strong class="lg">${esc(c.name)}</strong> <span class="small muted2">${trrs.length} TR${trrs.length === 1 ? '' : 's'} · ${opps.length} opportunit${opps.length === 1 ? 'y' : 'ies'}</span>
+        ${c.notes ? `<div class="small muted">${esc(c.notes)}</div>` : ''}</div>
+      <form x-show="edit" x-cloak method="post" action="/customer/${esc(c.id)}" class="stack" style="flex:1">
+        ${field('Name', `<input name="name" value="${esc(c.name)}" required>`)}
+        ${field('Notes', `<textarea name="notes" rows="2">${esc(c.notes)}</textarea>`)}
+        <div class="row"><button class="btn btn-sm" type="submit">Save</button><button class="btn btn-outline btn-sm" type="button" @click="edit=false">Cancel</button></div>
+      </form>
+      <div class="row" x-show="!edit">
+        <a class="btn btn-sm" href="/trr/new?customer=${esc(c.id)}">+ TR</a>
+        <button class="btn btn-outline btn-sm" @click="edit=true">✏️ Rename / notes</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail-layout">
+    <div class="detail-main">
+      ${opps.map(o => {
+        const ot = trrs.filter(t => t.opportunityId === o.id);
+        return `<div class="card">
+          <div class="row-between wrap"><a href="/opp/${esc(o.id)}"><strong>◇ ${esc(o.name)}</strong></a>
+            <span class="small muted2">${esc([o.stage, o.rep, o.closeDate && `close ${o.closeDate}`].filter(Boolean).join(' · '))}</span></div>
+          ${ot.length ? treeRows(ot, kids, s) : '<div class="small muted2">No TRs in this opportunity yet.</div>'}
+          <div class="row"><a class="btn btn-outline btn-sm" href="/trr/new?opp=${esc(o.id)}">+ TR in this opportunity</a></div>
+        </div>`;
+      }).join('')}
+      ${un.length ? `<div class="card"><strong class="muted2">No opportunity</strong>${treeRows(un, kids, s)}</div>` : ''}
+      <form class="card stack" method="post" action="/customer/${esc(c.id)}/opps">
+        <strong>+ Opportunity</strong>
+        <div class="grid2">
+          ${field('Name *', '<input name="name" required>')}
+          ${field('Stage', '<input name="stage">')}
+          ${field('Rep', '<input name="rep">')}
+          ${field('Close date', '<input type="date" name="closeDate">')}
+        </div>
+        <div><button class="btn btn-sm" type="submit">Add opportunity</button></div>
+      </form>
+    </div>
+    <aside class="detail-side">
+      ${summaryPanel('customer', c.id, versions, s.aiEnabled, { open: true })}
+      <div class="card">
+        <h3>Merge</h3>
+        <form method="post" action="/customer/${esc(c.id)}/merge" class="row" onsubmit="return confirm('Move every TR and opportunity of ${esc(c.name)} into the selected customer, then remove ${esc(c.name)}?')">
+          <select name="into" required><option value="">Merge into…</option>${all.filter(x => x.id !== c.id).map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select>
+          <button class="btn btn-outline btn-sm" type="submit">Merge</button>
+        </form>
+        <div class="small muted2">For duplicates left over from free-text names (“Acme” vs “Acme Corp”).</div>
+        ${trrs.length === 0 ? `<form method="post" action="/customer/${esc(c.id)}/delete" onsubmit="return confirm('Delete this customer?')" style="margin-top:8px"><button class="btn btn-outline danger btn-sm" type="submit">Delete customer</button></form>` : ''}
+      </div>
+    </aside>
+  </div>`);
+}
+
+export function oppPage(o: Opportunity, c: Customer, trrs: Trr[], s: Settings, versions: ScopeSummary[]): string {
+  const kids = new Map<string, Trr[]>();
+  for (const t of trrs) if (t.parentId) { if (!kids.has(t.parentId)) kids.set(t.parentId, []); kids.get(t.parentId)!.push(t); }
+  return page(o.name, '/accounts', `
+  ${breadcrumbs([{ href: '/accounts', label: 'Accounts' }, { href: `/customer/${c.id}`, label: c.name }, { label: o.name }])}
+  <div class="detail-layout">
+    <div class="detail-main">
+      <div class="card">
+        <div class="row-between wrap"><strong class="lg">◇ ${esc(o.name)}</strong><a class="btn btn-sm" href="/trr/new?opp=${esc(o.id)}">+ TR</a></div>
+        ${trrs.length ? treeRows(trrs, kids, s) : '<div class="small muted2">No TRs yet.</div>'}
+      </div>
+      <form class="card stack" method="post" action="/opp/${esc(o.id)}">
+        <strong>Opportunity details</strong>
+        <div class="grid2">
+          ${field('Name *', `<input name="name" value="${esc(o.name)}" required>`)}
+          ${field('Stage', `<input name="stage" value="${esc(o.stage)}">`)}
+          ${field('Rep', `<input name="rep" value="${esc(o.rep)}">`)}
+          ${field('Close date', `<input type="date" name="closeDate" value="${esc(o.closeDate)}">`)}
+        </div>
+        ${field('Notes', `<textarea name="notes" rows="3">${esc(o.notes)}</textarea>`)}
+        <div class="row"><button class="btn btn-sm" type="submit">Save</button></div>
+      </form>
+    </div>
+    <aside class="detail-side">
+      ${summaryPanel('opportunity', o.id, versions, s.aiEnabled, { open: true })}
+      <div class="card">
+        <form method="post" action="/opp/${esc(o.id)}/delete" onsubmit="return confirm('Delete this opportunity? Its TRs are kept and become unassigned.')">
+          <button class="btn btn-outline danger btn-sm" type="submit">Delete opportunity</button>
+        </form>
+      </div>
+    </aside>
+  </div>`);
+}
+
+// --- Update Desk -------------------------------------------------------------------
+
+export function deskSummaryFragment(desk: Desk, counts: Record<string, number>, aggregate: string): string {
+  const tile = (n: number, label: string, cls: string) =>
+    `<div class="tile"><div class="tile-value ${cls}">${n}</div><div class="tile-label">${label}</div></div>`;
+  const needs = counts.overdue! + counts.due!;
+  return `
+  <div id="desk-summary" hx-get="/fragments/updates/summary?cycle=${esc(desk.cycleDue)}" hx-trigger="desk-changed from:body" hx-swap="outerHTML">
+    <div class="tiles">
+      ${tile(counts.overdue!, `${DESK_STATE.overdue.sym} Overdue`, 'ds-overdue')}
+      ${tile(counts.due!, `${DESK_STATE.due.sym} Due`, 'ds-due')}
+      ${tile(counts.draft!, `${DESK_STATE.draft.sym} Drafts ready`, 'ds-draft')}
+      ${tile(counts.posted!, `${DESK_STATE.posted.sym} Posted`, 'ds-posted')}
+      ${tile(counts['not-due']!, `${DESK_STATE['not-due'].sym} Not due`, 'ds-notdue')}
+      ${tile(counts.quiet!, 'No new activity', '')}
+    </div>
+    <details class="card" x-data ${needs === 0 && counts.draft! + counts.posted! > 0 ? 'open' : ''}>
+      <summary class="row-between"><strong>📋 All updates — one block to paste</strong>
+        <button class="btn btn-sm" @click.prevent="navigator.clipboard.writeText($refs.agg.innerText).then(()=>{$el.textContent='✓ copied'; setTimeout(()=>$el.textContent='📋 copy all',1200)})">📋 copy all</button></summary>
+      <pre class="report-pre" x-ref="agg">${esc(aggregate)}</pre>
+    </details>
+  </div>`;
+}
+
+export function updateDesk(desk: Desk, s: Settings, counts: Record<string, number>, aggregate: string, filter: string): string {
+  const today = localDay();
+  const until = daysBetween(today, desk.cycleDue);
+  const when = until === 0 ? 'today' : until > 0 ? `in ${until} day${until === 1 ? '' : 's'}` : `${-until} day${until === -1 ? '' : 's'} ago`;
+  const show = (r: DeskRow) =>
+    filter === 'needs' ? (r.state === 'due' || r.state === 'overdue' || r.state === 'draft') :
+    filter === 'posted' ? r.state === 'posted' :
+    filter === 'quiet' ? r.state !== 'posted' && r.entries.length === 0 : true;
+  const rows = desk.rows.filter(show);
+  // group: customer -> rows (children already sit right after their parent family)
+  const groups = new Map<string, DeskRow[]>();
+  for (const r of rows) {
+    const k = r.trr.customer;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(r);
+  }
+  // per-parent completeness: "3/4 children posted"
+  const famStats = new Map<string, { parent: Trr; n: number; done: number }>();
+  for (const r of desk.rows) if (r.parent) {
+    const f = famStats.get(r.parent.id) ?? { parent: r.parent, n: 0, done: 0 };
+    f.n++;
+    if (r.state === 'posted' || r.state === 'not-due') f.done++;
+    famStats.set(r.parent.id, f);
+  }
+  const fbtn = (k: string, label: string) => `<a class="seg ${filter === k ? 'active' : ''}" href="/updates?cycle=${esc(desk.cycleDue)}${k === 'all' ? '' : `&f=${k}`}">${label}</a>`;
+  const seenParent = new Set<string>();
+  return page('Update Desk', '/updates', `
+  <div class="row-between wrap">
+    <div>
+      <h2 style="margin-bottom:2px">Update Desk — cycle due ${esc(shortDay(desk.cycleDue))} <span class="muted2 small">(${esc(desk.cycleDue)}, ${when})</span></h2>
+      <div class="small muted2">Every TR ID owes an update each ${esc(WEEKDAYS[s.updateDueWeekday]!)}. The window is everything logged since that TR's last <em>posted</em> update, so a missed week rolls forward instead of getting lost.</div>
+    </div>
+    <div class="row">
+      <a class="btn btn-outline btn-sm" href="/updates?cycle=${addDays(desk.cycleDue, -7)}">← previous cycle</a>
+      ${desk.current ? '' : `<a class="btn btn-outline btn-sm" href="/updates">current cycle</a>`}
+      ${!desk.current && desk.cycleDue < localDay() ? `<a class="btn btn-outline btn-sm" href="/updates?cycle=${addDays(desk.cycleDue, 7)}">next cycle →</a>` : ''}
+    </div>
+  </div>
+  ${desk.current ? '' : `<div class="card banner small">Viewing a past cycle: rows show what was posted or drafted then. Missing rows are TRs that owed an update and never got one.</div>`}
+  ${deskSummaryFragment(desk, counts, aggregate)}
+  <div class="row-between wrap">
+    <div class="segmented" role="group" aria-label="Show">
+      ${fbtn('all', `All (${desk.rows.length})`)}${fbtn('needs', 'Needs action')}${fbtn('quiet', 'No new activity')}${fbtn('posted', 'Posted')}
+    </div>
+    ${desk.current ? `<div class="row">
+      ${s.aiEnabled ? `<button class="btn btn-sm" hx-post="/updates/bulk?cycle=${esc(desk.cycleDue)}" hx-target="#bulk-out" hx-swap="innerHTML">🤖 Draft all missing</button>
+      ${counts.stale ? `<button class="btn btn-outline btn-sm" hx-post="/updates/bulk?cycle=${esc(desk.cycleDue)}&stale=1" hx-target="#bulk-out" hx-swap="innerHTML">↻ Also redraft ${counts.stale} stale</button>` : ''}` : ''}
+      ${counts.draft ? `<form method="post" action="/updates/post-all?cycle=${esc(desk.cycleDue)}" onsubmit="return confirm('Mark all ${counts.draft} drafts as posted? Do this after pasting them into the other system.')"><button class="btn btn-outline btn-sm btn-post" type="submit">✓ Mark all ${counts.draft} drafts posted</button></form>` : ''}
+    </div>` : ''}
+  </div>
+  <div id="bulk-out"></div>
+  ${rows.length === 0 ? '<div class="card muted center">Nothing here for this filter.</div>' : ''}
+  ${[...groups.entries()].map(([cust, list]) => `
+    <section class="desk-group">
+      <h3 class="desk-cust">${esc(cust)}</h3>
+      ${list.map(r => {
+        let head = '';
+        if (r.parent && !seenParent.has(r.parent.id)) {
+          seenParent.add(r.parent.id);
+          const f = famStats.get(r.parent.id)!;
+          head = `<div class="desk-parent"><a href="/trr/${esc(r.parent.id)}"><span class="trr-num">#${r.parent.num}</span> ${trIdBadge(r.parent)} ${esc(r.parent.title)}</a>
+            <span class="small ${f.done === f.n ? 'ds-posted' : 'warn'}">${f.done}/${f.n} children covered</span></div>`;
+        }
+        return head + updateRowCard(r, desk.cycleDue, s.aiEnabled && desk.current);
+      }).join('')}
+    </section>`).join('')}
+  `);
 }
 
 // --- Archive ----------------------------------------------------------------
@@ -312,13 +718,20 @@ export function periodDigestFragment(d: PeriodDigest): string {
 
 export function reports(weeklyText: string, periodReports: import('../db/repo.js').PeriodReportMeta[]): string {
   return page('Reports', '/reports', `
-  <div class="card" x-data>
+  <div class="card banner">
     <div class="row-between wrap">
-      <strong>📋 Weekly report</strong>
-      <button class="btn btn-outline btn-sm" @click="navigator.clipboard.writeText($refs.w.innerText).then(()=>{$el.textContent='✓ copied'; setTimeout(()=>$el.textContent='📋 copy',1200)})">📋 copy</button>
+      <div><strong>🗓 Weekly updates moved to the Update Desk</strong>
+        <div class="small muted2">Per-TR updates since the last posted one, due-day tracking, one-block copy/paste, and who is missing an update.</div></div>
+      <a class="btn" href="/updates">Open Update Desk →</a>
     </div>
-    <pre class="report-pre" x-ref="w">${esc(weeklyText)}</pre>
   </div>
+  <details class="card" x-data>
+    <summary class="row-between wrap">
+      <strong>📋 Activity snapshot (last 7 days)</strong>
+      <button class="btn btn-outline btn-sm" @click.prevent="navigator.clipboard.writeText($refs.w.innerText).then(()=>{$el.textContent='✓ copied'; setTimeout(()=>$el.textContent='📋 copy',1200)})">📋 copy</button>
+    </summary>
+    <pre class="report-pre" x-ref="w">${esc(weeklyText)}</pre>
+  </details>
 
   <h3>Saved period digests (${periodReports.length})</h3>
   <div class="small muted2" style="margin-bottom:8px">Every period-digest narrative run (Stats page) is saved here automatically.</div>
@@ -689,6 +1102,15 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
       <div class="small muted2">Notes containing the official-record tag (e.g. “sfdc”, “crm”, “official”) — or a [Name YYYY-MM-DD GMT] stamp — are treated as what was formally reported upstream; digests and reviews weight them as authoritative.</div>
     </div>
     <div class="card">
+      <h3>Weekly updates</h3>
+      <div class="grid2">
+        ${field('Updates are due every', `<select name="updateDueWeekday">${WEEKDAYS.map((d, n) => `<option value="${n}" ${n === s.updateDueWeekday ? 'selected' : ''}>${d}</option>`).join('')}</select>`)}
+        ${field('Default cadence', select('updateCadence', ['weekly', 'biweekly', 'none'], s.updateCadence))}
+      </div>
+      <label class="check"><input type="checkbox" name="logPostedUpdates" value="1" ${s.logPostedUpdates ? 'checked' : ''}> Log each posted update on its TR as an official-record note (tagged “${esc(s.officialTag)}”, so Stats and reviews count it)</label>
+      <div class="small muted2">Each TR can override the cadence on its edit page. A parent TR that has children reports through its children unless it sets its own cadence. Dates use the server's time zone (<code>TZ</code> in docker-compose) — currently ${esc(localDay())}, ${esc(Intl.DateTimeFormat().resolvedOptions().timeZone)}.</div>
+    </div>
+    <div class="card">
       <h3>Health & automation</h3>
       <div class="grid2">
         ${field('Green ≤ (days)', `<input type="number" name="greenDays" value="${s.greenDays}" min="1">`)}
@@ -711,7 +1133,9 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
       ${field('Customer-facing (per note)', `<textarea name="custTmpl" rows="8" class="mono">${esc(s.custTmpl)}</textarea>`)}
       ${field('Exec summary (per note)', `<textarea name="execTmpl" rows="8" class="mono">${esc(s.execTmpl)}</textarea>`)}
       ${field('Period self-eval (digest)', `<textarea name="evalTmpl" rows="8" class="mono">${esc(s.evalTmpl)}</textarea>`)}
-      ${field('Per-TRR catch-up (digest)', `<textarea name="trrDigestTmpl" rows="8" class="mono">${esc(s.trrDigestTmpl)}</textarea>`)}
+      ${field('Per-TRR catch-up (digest — auto-run on archive)', `<textarea name="trrDigestTmpl" rows="8" class="mono">${esc(s.trrDigestTmpl)}</textarea>`)}
+      ${field('Weekly update ({{externalId}} {{customer}} {{opportunity}} {{title}} {{parent}} {{status}} {{from}} {{to}} {{count}} {{entries}})', `<textarea name="updateTmpl" rows="8" class="mono">${esc(s.updateTmpl)}</textarea>`)}
+      ${field('Summary to date ({{scope}} {{requests}} {{previous}} {{entriesLabel}} {{entries}})', `<textarea name="summaryTmpl" rows="8" class="mono">${esc(s.summaryTmpl)}</textarea>`)}
       <div class="small muted" style="margin-top:6px">The review engine runs in two stages: <strong>map</strong> pulls question-relevant evidence out of each record slice, then <strong>reduce</strong> writes the answer from everything gathered.</div>
       ${field('Review — reduce / synthesis ({{questions}} {{facts}} {{official}} {{findings}} {{instructions}})', `<textarea name="reviewTmpl" rows="8" class="mono">${esc(s.reviewTmpl)}</textarea>`)}
       ${field('Review — map / per-slice extraction ({{question}} {{slice}} {{engagements}})', `<textarea name="reviewMapTmpl" rows="8" class="mono">${esc(s.reviewMapTmpl)}</textarea>`)}
@@ -785,4 +1209,8 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
 
 export function notFound(): string {
   return page('Not found', '/', '<div class="card center"><h2>404</h2><p class="muted">Nothing here.</p><a class="btn" href="/">Dashboard</a></div>');
+}
+
+export function messagePage(title: string, msg: string, back: string): string {
+  return page(title, '/', `<div class="card"><h2>${esc(title)}</h2><p class="danger">${esc(msg)}</p><a class="btn btn-outline" href="${esc(back)}">← Back</a></div>`);
 }

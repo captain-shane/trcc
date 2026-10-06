@@ -1,9 +1,12 @@
 import { db } from './index.js';
 import { config } from '../config.js';
-import type { Interaction, Settings, StoredDigest, Trr, TrrHistoryEntry } from '../types.js';
+import type {
+  Customer, Interaction, NewInteraction, NewTrr, Opportunity, ScopeSummary, Settings,
+  StoredDigest, SummaryScopeKind, Trr, TrrHistoryEntry, TrUpdate,
+} from '../types.js';
 import {
   DEFAULT_ARCHIVED_STATUS, DEFAULT_CLOSED_STATUSES, DEFAULT_OUTCOMES,
-  DEFAULT_ROLES, DEFAULT_STATUSES, DEFAULT_THEMES,
+  DEFAULT_ROLES, DEFAULT_STATUSES, DEFAULT_THEMES, UPDATE_CADENCES, uid,
 } from '../types.js';
 
 // --- row mapping -----------------------------------------------------------
@@ -13,11 +16,13 @@ type TrrRow = {
   priority: string; contact: string; rep: string; target_close: string;
   description: string; my_role: string; outcome: string; value_theme: string;
   deactivated: number; deactivated_at: string; created_at: string; last_contact: string;
+  customer_id: string | null; opportunity_id: string | null; parent_id: string | null;
+  external_id: string; update_cadence: string;
 };
 
 type IntRow = {
   id: string; trr_id: string; type: string; date: string; note: string;
-  ai_exec: string; ai_cust: string; sensitive: number; created_at: string;
+  ai_exec: string; ai_cust: string; sensitive: number; source: string; created_at: string;
 };
 
 function toTrr(r: TrrRow): Trr {
@@ -30,6 +35,10 @@ function toTrr(r: TrrRow): Trr {
     valueThemes: r.value_theme ? r.value_theme.split(',').filter(Boolean) : [],
     deactivated: !!r.deactivated, deactivatedAt: r.deactivated_at,
     createdAt: r.created_at, lastContact: r.last_contact,
+    customerId: r.customer_id ?? '', opportunityId: r.opportunity_id ?? '',
+    parentId: r.parent_id ?? '', externalId: r.external_id ?? '',
+    updateCadence: (UPDATE_CADENCES as readonly string[]).includes(r.update_cadence)
+      ? r.update_cadence as Trr['updateCadence'] : '',
   };
 }
 
@@ -37,7 +46,7 @@ function toInteraction(r: IntRow): Interaction {
   return {
     id: r.id, trrId: r.trr_id, type: r.type as Interaction['type'], date: r.date,
     note: r.note, aiExec: r.ai_exec, aiCust: r.ai_cust,
-    sensitive: !!r.sensitive, createdAt: r.created_at,
+    sensitive: !!r.sensitive, source: r.source ?? '', createdAt: r.created_at,
   };
 }
 
@@ -59,18 +68,62 @@ export function getTrr(id: string): Trr | null {
   return r ? toTrr(r) : null;
 }
 
-export function insertTrr(t: Omit<Trr, 'num'>): void {
+/** Raised when a save would break the hierarchy rules; the message is user-facing. */
+export class HierarchyError extends Error {}
+
+/**
+ * Enforce the hierarchy on a TR about to be saved and fill the derived fields:
+ *  - one level only: a parent cannot have a parent, and a TR with children cannot become a child;
+ *  - a child inherits its parent's customer and opportunity (they are the parent's, not its own);
+ *  - otherwise the customer is resolved from customerId, or created from the free-text name;
+ *  - an opportunity must belong to the TR's customer, else it is cleared.
+ */
+function resolveHierarchy<T extends Partial<Trr> & { id: string; customer: string }>(t: T): T & Pick<Trr, 'customerId' | 'opportunityId' | 'parentId'> {
+  const out = { ...t, customerId: t.customerId ?? '', opportunityId: t.opportunityId ?? '', parentId: t.parentId ?? '' };
+  if (out.parentId) {
+    if (out.parentId === out.id) throw new HierarchyError('A TR cannot be its own parent.');
+    const parent = getTrr(out.parentId);
+    if (!parent) throw new HierarchyError('The selected parent TR no longer exists.');
+    if (parent.parentId) throw new HierarchyError(`#${parent.num} is itself a child TR — only one level of children is supported.`);
+    if (listChildren(out.id).length) throw new HierarchyError('This TR has child TRs of its own, so it cannot become a child.');
+    out.customerId = parent.customerId;
+    out.customer = parent.customer;
+    out.opportunityId = parent.opportunityId;
+    return out;
+  }
+  const byId = out.customerId ? getCustomer(out.customerId) : null;
+  const cust = byId && (!out.customer || byId.name.toLowerCase() === out.customer.trim().toLowerCase())
+    ? byId : ensureCustomer(out.customer);
+  out.customerId = cust.id;
+  out.customer = cust.name;
+  if (out.opportunityId) {
+    const opp = getOpportunity(out.opportunityId);
+    if (!opp || opp.customerId !== cust.id) out.opportunityId = '';
+  }
+  return out;
+}
+
+const nul = (v: string) => (v ? v : null);
+
+export function insertTrr(input: NewTrr): void {
   db.transaction(() => {
+    const t = resolveHierarchy({ externalId: '', updateCadence: '', ...input });
     const next = (db.prepare('SELECT COALESCE(MAX(num), 0) + 1 AS n FROM trrs').get() as { n: number }).n;
     db.prepare(`
       INSERT INTO trrs (id, num, customer, title, status, complexity, priority, contact, rep,
         target_close, description, my_role, outcome, value_theme,
-        deactivated, deactivated_at, created_at, last_contact)
+        deactivated, deactivated_at, created_at, last_contact,
+        customer_id, opportunity_id, parent_id, external_id, update_cadence)
       VALUES (@id, @num, @customer, @title, @status, @complexity, @priority, @contact, @rep,
         @targetClose, @description, @myRole, @outcome, @valueTheme,
-        @deactivated, @deactivatedAt, @createdAt, @lastContact)
-    `).run({ ...t, num: next, valueTheme: t.valueThemes.join(','), deactivated: t.deactivated ? 1 : 0 });
+        @deactivated, @deactivatedAt, @createdAt, @lastContact,
+        @customerIdN, @opportunityIdN, @parentIdN, @externalId, @updateCadence)
+    `).run({
+      ...t, num: next, valueTheme: t.valueThemes.join(','), deactivated: t.deactivated ? 1 : 0,
+      customerIdN: nul(t.customerId), opportunityIdN: nul(t.opportunityId), parentIdN: nul(t.parentId),
+    });
     recordHistory(t.id, 'created', '', t.status, t.createdAt);
+    if (t.parentId) recordHistory(t.id, 'parent', '', `#${getTrr(t.parentId)?.num ?? '?'}`, t.createdAt);
   })();
 }
 
@@ -81,24 +134,43 @@ const TRACKED: { key: keyof Trr; label: string }[] = [
   { key: 'priority', label: 'priority' },
   { key: 'myRole', label: 'my role' },
   { key: 'outcome', label: 'outcome' },
+  { key: 'externalId', label: 'TR ID' },
+  { key: 'customer', label: 'customer' },
 ];
 
 export function updateTrr(id: string, patch: Partial<Trr>): void {
   const cur = getTrr(id);
   if (!cur) return;
-  const t = { ...cur, ...patch };
   db.transaction(() => {
+    // A rename of the customer text without a new customerId means "move to that customer".
+    const merged = { ...cur, ...patch };
+    if (patch.customer !== undefined && patch.customerId === undefined && patch.customer.trim().toLowerCase() !== cur.customer.toLowerCase()) {
+      merged.customerId = '';
+    }
+    const t = resolveHierarchy(merged);
     db.prepare(`
       UPDATE trrs SET customer=@customer, title=@title, status=@status, complexity=@complexity,
         priority=@priority, contact=@contact, rep=@rep, target_close=@targetClose,
         description=@description, my_role=@myRole, outcome=@outcome, value_theme=@valueTheme,
-        deactivated=@deactivated, deactivated_at=@deactivatedAt, last_contact=@lastContact
+        deactivated=@deactivated, deactivated_at=@deactivatedAt, last_contact=@lastContact,
+        customer_id=@customerIdN, opportunity_id=@opportunityIdN, parent_id=@parentIdN,
+        external_id=@externalId, update_cadence=@updateCadence
       WHERE id=@id
-    `).run({ ...t, valueTheme: t.valueThemes.join(','), deactivated: t.deactivated ? 1 : 0 });
+    `).run({
+      ...t, valueTheme: t.valueThemes.join(','), deactivated: t.deactivated ? 1 : 0,
+      customerIdN: nul(t.customerId), opportunityIdN: nul(t.opportunityId), parentIdN: nul(t.parentId),
+    });
     for (const { key, label } of TRACKED) {
       if (String(cur[key] ?? '') !== String(t[key] ?? '')) {
         recordHistory(id, label, String(cur[key] ?? ''), String(t[key] ?? ''));
       }
+    }
+    if (cur.opportunityId !== t.opportunityId) {
+      recordHistory(id, 'opportunity', oppName(cur.opportunityId), oppName(t.opportunityId));
+    }
+    if (cur.parentId !== t.parentId) {
+      const num = (pid: string) => (pid ? `#${getTrr(pid)?.num ?? '?'}` : '');
+      recordHistory(id, 'parent', num(cur.parentId), num(t.parentId));
     }
     const curThemes = cur.valueThemes.join(', ');
     const newThemes = t.valueThemes.join(', ');
@@ -107,11 +179,167 @@ export function updateTrr(id: string, patch: Partial<Trr>): void {
       recordHistory(id, 'deactivation', cur.deactivated ? 'deactivated' : 'active',
         t.deactivated ? 'deactivated' : 'active');
     }
+    // Children follow their parent's customer and opportunity.
+    if (cur.customerId !== t.customerId || cur.opportunityId !== t.opportunityId) {
+      for (const c of listChildren(id)) {
+        db.prepare('UPDATE trrs SET customer=?, customer_id=?, opportunity_id=? WHERE id=?')
+          .run(t.customer, nul(t.customerId), nul(t.opportunityId), c.id);
+      }
+    }
   })();
 }
 
+function oppName(id: string): string {
+  return id ? (getOpportunity(id)?.name ?? '?') : '';
+}
+
 export function deleteTrr(id: string): void {
-  db.prepare('DELETE FROM trrs WHERE id = ?').run(id);
+  // children survive as standalone TRs (parent_id ON DELETE SET NULL)
+  db.transaction(() => {
+    db.prepare(`DELETE FROM summaries WHERE scope_kind IN ('trr','family') AND scope_id = ?`).run(id);
+    db.prepare('DELETE FROM trrs WHERE id = ?').run(id);
+  })();
+}
+
+// --- Hierarchy -------------------------------------------------------------
+
+export function listChildren(parentId: string): Trr[] {
+  return (db.prepare('SELECT * FROM trrs WHERE parent_id = ? ORDER BY num').all(parentId) as TrrRow[]).map(toTrr);
+}
+
+/** Map parentId -> children, for rendering trees without N queries. */
+export function childrenIndex(trrs: Trr[]): Map<string, Trr[]> {
+  const m = new Map<string, Trr[]>();
+  for (const t of trrs) {
+    if (!t.parentId) continue;
+    if (!m.has(t.parentId)) m.set(t.parentId, []);
+    m.get(t.parentId)!.push(t);
+  }
+  for (const list of m.values()) list.sort((a, b) => a.num - b.num);
+  return m;
+}
+
+/** A TR plus its children (or just itself when it has none). */
+export function familyOf(id: string): Trr[] {
+  const t = getTrr(id);
+  if (!t) return [];
+  return [t, ...listChildren(t.id)];
+}
+
+// --- Customers -------------------------------------------------------------
+
+type CustRow = { id: string; name: string; notes: string; created_at: string };
+const toCustomer = (r: CustRow): Customer => ({ id: r.id, name: r.name, notes: r.notes, createdAt: r.created_at });
+
+export function listCustomers(): Customer[] {
+  return (db.prepare('SELECT * FROM customers ORDER BY name COLLATE NOCASE').all() as CustRow[]).map(toCustomer);
+}
+
+export function getCustomer(id: string): Customer | null {
+  const r = db.prepare('SELECT * FROM customers WHERE id = ?').get(id) as CustRow | undefined;
+  return r ? toCustomer(r) : null;
+}
+
+export function findCustomerByName(name: string): Customer | null {
+  const r = db.prepare('SELECT * FROM customers WHERE name = ? COLLATE NOCASE').get(name.trim()) as CustRow | undefined;
+  return r ? toCustomer(r) : null;
+}
+
+/** Find by (case-insensitive) name, or create. */
+export function ensureCustomer(name: string): Customer {
+  const clean = name.trim();
+  if (!clean) throw new HierarchyError('Customer is required.');
+  const found = findCustomerByName(clean);
+  if (found) return found;
+  const c: Customer = { id: uid(), name: clean, notes: '', createdAt: new Date().toISOString() };
+  db.prepare('INSERT INTO customers (id, name, notes, created_at) VALUES (@id, @name, @notes, @createdAt)').run(c);
+  return c;
+}
+
+export function updateCustomer(id: string, patch: { name?: string; notes?: string }): void {
+  const cur = getCustomer(id);
+  if (!cur) return;
+  const name = (patch.name ?? cur.name).trim() || cur.name;
+  const clash = findCustomerByName(name);
+  if (clash && clash.id !== id) throw new HierarchyError(`A customer named "${clash.name}" already exists — merge into it instead.`);
+  db.transaction(() => {
+    db.prepare('UPDATE customers SET name = ?, notes = ? WHERE id = ?').run(name, patch.notes ?? cur.notes, id);
+    if (name !== cur.name) {
+      const ids = db.prepare('SELECT id FROM trrs WHERE customer_id = ?').all(id) as { id: string }[];
+      db.prepare('UPDATE trrs SET customer = ? WHERE customer_id = ?').run(name, id);
+      for (const r of ids) recordHistory(r.id, 'customer', cur.name, name);
+    }
+  })();
+}
+
+/** Fold one customer into another: TRs and opportunities move, the source is removed. */
+export function mergeCustomer(fromId: string, intoId: string): void {
+  const from = getCustomer(fromId), into = getCustomer(intoId);
+  if (!from || !into || fromId === intoId) return;
+  db.transaction(() => {
+    const ids = db.prepare('SELECT id FROM trrs WHERE customer_id = ?').all(fromId) as { id: string }[];
+    db.prepare('UPDATE trrs SET customer_id = ?, customer = ? WHERE customer_id = ?').run(intoId, into.name, fromId);
+    db.prepare('UPDATE opportunities SET customer_id = ? WHERE customer_id = ?').run(intoId, fromId);
+    for (const r of ids) recordHistory(r.id, 'customer', from.name, into.name);
+    db.prepare(`UPDATE summaries SET scope_id = ? WHERE scope_kind = 'customer' AND scope_id = ?`).run(intoId, fromId);
+    db.prepare('DELETE FROM customers WHERE id = ?').run(fromId);
+  })();
+}
+
+/** Only an empty customer can be deleted (no TRs); its opportunities go with it. */
+export function deleteCustomer(id: string): boolean {
+  const n = (db.prepare('SELECT count(*) n FROM trrs WHERE customer_id = ?').get(id) as { n: number }).n;
+  if (n > 0) return false;
+  db.transaction(() => {
+    db.prepare(`DELETE FROM summaries WHERE scope_kind = 'opportunity' AND scope_id IN (SELECT id FROM opportunities WHERE customer_id = ?)`).run(id);
+    db.prepare(`DELETE FROM summaries WHERE scope_kind = 'customer' AND scope_id = ?`).run(id);
+    db.prepare('DELETE FROM customers WHERE id = ?').run(id);
+  })();
+  return true;
+}
+
+// --- Opportunities ---------------------------------------------------------
+
+type OppRow = { id: string; customer_id: string; name: string; stage: string; rep: string; close_date: string; notes: string; created_at: string };
+const toOpp = (r: OppRow): Opportunity => ({
+  id: r.id, customerId: r.customer_id, name: r.name, stage: r.stage, rep: r.rep,
+  closeDate: r.close_date, notes: r.notes, createdAt: r.created_at,
+});
+
+export function listOpportunities(customerId?: string): Opportunity[] {
+  const rows = customerId
+    ? db.prepare('SELECT * FROM opportunities WHERE customer_id = ? ORDER BY created_at').all(customerId)
+    : db.prepare('SELECT * FROM opportunities ORDER BY created_at').all();
+  return (rows as OppRow[]).map(toOpp);
+}
+
+export function getOpportunity(id: string): Opportunity | null {
+  const r = db.prepare('SELECT * FROM opportunities WHERE id = ?').get(id) as OppRow | undefined;
+  return r ? toOpp(r) : null;
+}
+
+export function insertOpportunity(o: Omit<Opportunity, 'id' | 'createdAt'> & { id?: string; createdAt?: string }): Opportunity {
+  if (!getCustomer(o.customerId)) throw new HierarchyError('Unknown customer.');
+  if (!o.name.trim()) throw new HierarchyError('Opportunity name is required.');
+  const opp: Opportunity = { ...o, name: o.name.trim(), id: o.id ?? uid(), createdAt: o.createdAt ?? new Date().toISOString() };
+  db.prepare(`INSERT INTO opportunities (id, customer_id, name, stage, rep, close_date, notes, created_at)
+    VALUES (@id, @customerId, @name, @stage, @rep, @closeDate, @notes, @createdAt)`).run(opp);
+  return opp;
+}
+
+export function updateOpportunity(id: string, patch: Partial<Omit<Opportunity, 'id' | 'customerId' | 'createdAt'>>): void {
+  const cur = getOpportunity(id);
+  if (!cur) return;
+  const o = { ...cur, ...patch, name: (patch.name ?? cur.name).trim() || cur.name };
+  db.prepare(`UPDATE opportunities SET name=@name, stage=@stage, rep=@rep, close_date=@closeDate, notes=@notes WHERE id=@id`).run(o);
+}
+
+/** TRs in the opportunity become unassigned (ON DELETE SET NULL), never deleted. */
+export function deleteOpportunity(id: string): void {
+  db.transaction(() => {
+    db.prepare(`DELETE FROM summaries WHERE scope_kind = 'opportunity' AND scope_id = ?`).run(id);
+    db.prepare('DELETE FROM opportunities WHERE id = ?').run(id);
+  })();
 }
 
 // --- History (audit trail) -------------------------------------------------
@@ -151,10 +379,11 @@ export function getInteraction(id: string): Interaction | null {
   return r ? toInteraction(r) : null;
 }
 
-export function insertInteraction(i: Interaction): void {
+export function insertInteraction(input: NewInteraction): void {
+  const i: Interaction = { source: '', ...input };
   db.prepare(`
-    INSERT INTO interactions (id, trr_id, type, date, note, ai_exec, ai_cust, sensitive, created_at)
-    VALUES (@id, @trrId, @type, @date, @note, @aiExec, @aiCust, @sensitive, @createdAt)
+    INSERT INTO interactions (id, trr_id, type, date, note, ai_exec, ai_cust, sensitive, source, created_at)
+    VALUES (@id, @trrId, @type, @date, @note, @aiExec, @aiCust, @sensitive, @source, @createdAt)
   `).run({ ...i, sensitive: i.sensitive ? 1 : 0 });
 }
 
@@ -172,11 +401,55 @@ export function deleteInteraction(id: string): void {
   db.prepare('DELETE FROM interactions WHERE id = ?').run(id);
 }
 
+// --- Interaction links (one log, several TRs) --------------------------------
+
+/** Replace the extra TRs a log is linked to (the owning TR is implicit, never a link). */
+export function setInteractionLinks(interactionId: string, trrIds: string[]): void {
+  const owner = getInteraction(interactionId)?.trrId;
+  const ids = [...new Set(trrIds)].filter(id => id && id !== owner && getTrr(id));
+  db.transaction(() => {
+    db.prepare('DELETE FROM interaction_links WHERE interaction_id = ?').run(interactionId);
+    const ins = db.prepare('INSERT INTO interaction_links (interaction_id, trr_id) VALUES (?, ?)');
+    for (const id of ids) ins.run(interactionId, id);
+  })();
+}
+
+export function interactionLinks(interactionId: string): string[] {
+  return (db.prepare('SELECT trr_id FROM interaction_links WHERE interaction_id = ?').all(interactionId) as { trr_id: string }[])
+    .map(r => r.trr_id);
+}
+
+/** interactionId -> linked TR ids, for every link (render-time lookup). */
+export function allInteractionLinks(): Map<string, string[]> {
+  const m = new Map<string, string[]>();
+  for (const r of db.prepare('SELECT interaction_id, trr_id FROM interaction_links').all() as { interaction_id: string; trr_id: string }[]) {
+    if (!m.has(r.interaction_id)) m.set(r.interaction_id, []);
+    m.get(r.interaction_id)!.push(r.trr_id);
+  }
+  return m;
+}
+
+/**
+ * Every log that belongs to any of these TRs — owned or linked — de-duplicated,
+ * newest first. This is the record a TR / family / opportunity / customer view
+ * and the weekly update read from.
+ */
+export function interactionsFor(trrIds: string[]): Interaction[] {
+  if (trrIds.length === 0) return [];
+  const ph = trrIds.map(() => '?').join(',');
+  return (db.prepare(`
+    SELECT * FROM interactions WHERE trr_id IN (${ph})
+    UNION
+    SELECT i.* FROM interactions i JOIN interaction_links l ON l.interaction_id = i.id WHERE l.trr_id IN (${ph})
+    ORDER BY date DESC, created_at DESC
+  `).all(...trrIds, ...trrIds) as IntRow[]).map(toInteraction);
+}
+
 /** Interactions with substantive notes and no exec summary yet (backfill queue). */
 export function interactionsNeedingExec(limit: number): Interaction[] {
   return (db.prepare(`
     SELECT * FROM interactions
-    WHERE length(trim(note)) >= 40 AND ai_exec = '' ORDER BY date DESC LIMIT ?
+    WHERE length(trim(note)) >= 40 AND ai_exec = '' AND source = '' ORDER BY date DESC LIMIT ?
   `).all(limit) as IntRow[]).map(toInteraction);
 }
 
@@ -253,6 +526,127 @@ export function getPeriodReport(id: number): { meta: PeriodReportMeta; statsJson
 
 export function deletePeriodReport(id: number): void {
   db.prepare('DELETE FROM period_reports WHERE id = ?').run(id);
+}
+
+// --- Weekly updates -----------------------------------------------------------
+
+type UpdRow = {
+  id: number; trr_id: string; cycle_due: string; window_from: string; window_to: string;
+  interactions: number; text: string; model: string; status: string; edited: number;
+  generated_at: string; posted_at: string;
+};
+const toUpdate = (r: UpdRow): TrUpdate => ({
+  id: r.id, trrId: r.trr_id, cycleDue: r.cycle_due, windowFrom: r.window_from, windowTo: r.window_to,
+  interactions: r.interactions, text: r.text, model: r.model,
+  status: r.status === 'posted' ? 'posted' : 'draft', edited: !!r.edited,
+  generatedAt: r.generated_at, postedAt: r.posted_at,
+});
+
+export function getUpdate(trrId: string, cycleDue: string): TrUpdate | null {
+  const r = db.prepare('SELECT * FROM updates WHERE trr_id = ? AND cycle_due = ?').get(trrId, cycleDue) as UpdRow | undefined;
+  return r ? toUpdate(r) : null;
+}
+
+export function getUpdateById(id: number): TrUpdate | null {
+  const r = db.prepare('SELECT * FROM updates WHERE id = ?').get(id) as UpdRow | undefined;
+  return r ? toUpdate(r) : null;
+}
+
+export function listUpdates(trrId?: string): TrUpdate[] {
+  const rows = trrId
+    ? db.prepare('SELECT * FROM updates WHERE trr_id = ? ORDER BY cycle_due DESC').all(trrId)
+    : db.prepare('SELECT * FROM updates ORDER BY cycle_due DESC, trr_id').all();
+  return (rows as UpdRow[]).map(toUpdate);
+}
+
+export function updatesForCycle(cycleDue: string): Map<string, TrUpdate> {
+  const rows = db.prepare('SELECT * FROM updates WHERE cycle_due = ?').all(cycleDue) as UpdRow[];
+  return new Map(rows.map(r => [r.trr_id, toUpdate(r)]));
+}
+
+/** trrId -> the most recent POSTED update (the "since" anchor of the next window). */
+export function lastPostedUpdates(before?: string): Map<string, TrUpdate> {
+  const rows = (before
+    ? db.prepare(`SELECT * FROM updates WHERE status = 'posted' AND cycle_due < ? ORDER BY posted_at`).all(before)
+    : db.prepare(`SELECT * FROM updates WHERE status = 'posted' ORDER BY posted_at`).all()) as UpdRow[];
+  const m = new Map<string, TrUpdate>();
+  for (const r of rows) m.set(r.trr_id, toUpdate(r)); // ascending, so the last write wins
+  return m;
+}
+
+/** Create or replace the draft for (TR, cycle). A posted update is never overwritten. */
+export function saveUpdateDraft(u: Pick<TrUpdate, 'trrId' | 'cycleDue' | 'windowFrom' | 'windowTo' | 'interactions' | 'text' | 'model'> & { edited?: boolean }): TrUpdate {
+  const cur = getUpdate(u.trrId, u.cycleDue);
+  if (cur?.status === 'posted') return cur;
+  db.prepare(`
+    INSERT INTO updates (trr_id, cycle_due, window_from, window_to, interactions, text, model, status, edited, generated_at)
+    VALUES (@trrId, @cycleDue, @windowFrom, @windowTo, @interactions, @text, @model, 'draft', @edited, @generatedAt)
+    ON CONFLICT(trr_id, cycle_due) DO UPDATE SET window_from=@windowFrom, window_to=@windowTo,
+      interactions=@interactions, text=@text, model=@model, edited=@edited, generated_at=@generatedAt
+  `).run({ ...u, edited: u.edited ? 1 : 0, generatedAt: new Date().toISOString() });
+  return getUpdate(u.trrId, u.cycleDue)!;
+}
+
+/** Hand edit of a draft or a posted update's text. */
+export function editUpdateText(id: number, text: string): void {
+  db.prepare('UPDATE updates SET text = ?, edited = 1 WHERE id = ?').run(text, id);
+}
+
+export function markUpdatePosted(id: number, at = new Date().toISOString()): void {
+  db.prepare(`UPDATE updates SET status = 'posted', posted_at = ?, window_to = CASE WHEN window_to = '' THEN ? ELSE window_to END WHERE id = ?`)
+    .run(at, at, id);
+}
+
+export function unpostUpdate(id: number): void {
+  db.prepare(`UPDATE updates SET status = 'draft', posted_at = '' WHERE id = ?`).run(id);
+}
+
+export function deleteUpdate(id: number): void {
+  db.prepare('DELETE FROM updates WHERE id = ?').run(id);
+}
+
+// --- Summaries to date (versioned) ----------------------------------------------
+
+type SumRow = {
+  id: number; scope_kind: string; scope_id: string; label: string; interactions: number;
+  first: string; last: string; through: string; summary: string; model: string; mode: string;
+  base_id: number | null; generated_at: string;
+};
+const toSummary = (r: SumRow): ScopeSummary => ({
+  id: r.id, scopeKind: r.scope_kind as SummaryScopeKind, scopeId: r.scope_id, label: r.label,
+  interactions: r.interactions, first: r.first, last: r.last, through: r.through,
+  summary: r.summary, model: r.model, mode: r.mode === 'incremental' ? 'incremental' : 'full',
+  baseId: r.base_id, generatedAt: r.generated_at,
+});
+
+export function insertSummary(x: Omit<ScopeSummary, 'id' | 'generatedAt'>): number {
+  const res = db.prepare(`
+    INSERT INTO summaries (scope_kind, scope_id, label, interactions, first, last, through, summary, model, mode, base_id, generated_at)
+    VALUES (@scopeKind, @scopeId, @label, @interactions, @first, @last, @through, @summary, @model, @mode, @baseId, @generatedAt)
+  `).run({ ...x, generatedAt: new Date().toISOString() });
+  return Number(res.lastInsertRowid);
+}
+
+export function listSummaries(kind: SummaryScopeKind, scopeId: string): ScopeSummary[] {
+  return (db.prepare('SELECT * FROM summaries WHERE scope_kind = ? AND scope_id = ? ORDER BY generated_at DESC, id DESC')
+    .all(kind, scopeId) as SumRow[]).map(toSummary);
+}
+
+export function latestSummary(kind: SummaryScopeKind, scopeId: string): ScopeSummary | null {
+  return listSummaries(kind, scopeId)[0] ?? null;
+}
+
+export function getSummary(id: number): ScopeSummary | null {
+  const r = db.prepare('SELECT * FROM summaries WHERE id = ?').get(id) as SumRow | undefined;
+  return r ? toSummary(r) : null;
+}
+
+export function allSummaries(): ScopeSummary[] {
+  return (db.prepare('SELECT * FROM summaries ORDER BY generated_at DESC').all() as SumRow[]).map(toSummary);
+}
+
+export function deleteSummary(id: number): void {
+  db.prepare('DELETE FROM summaries WHERE id = ?').run(id);
 }
 
 // --- Reviews (question-driven, persisted) ----------------------------------
@@ -435,6 +829,42 @@ Description: {{description}}
 === INTERACTIONS (chronological) ===
 {{interactions}}`;
 
+// Weekly update: one TR ID, the entries logged since its last posted update.
+const DEFAULT_UPDATE_TMPL = `Write the weekly status update for ONE technical request. It will be pasted straight into a tracking system. Output EXACTLY this format, nothing else — no heading, no markdown, no emoji:
+-Status: <one line: where the request stands now>
+-Activity: <one to three lines that COMBINE everything below into a single summary — not one line per entry>
+-Next: <one line, concrete next step, or 'none'>
+
+Rules: factual only, use ONLY the entries below. Never invent outcomes, dates, or next steps. Keep technical specifics (products, versions, sites, counts).
+
+TR ID: {{externalId}} | Customer: {{customer}} | Opportunity: {{opportunity}} | Request: {{title}} | Parent request: {{parent}} | Status: {{status}}
+Period: {{from}} to {{to}}
+
+=== ENTRIES SINCE THE LAST UPDATE ({{count}}) ===
+{{entries}}`;
+
+// Summary to date for any scope. Full build: {{previous}} is empty. Incremental
+// (or a record too big for one window): {{previous}} carries the summary so far
+// and the entries are only what is new / the next slice.
+const DEFAULT_SUMMARY_TMPL = `Write a summary-to-date of the engagement scope below, so someone can get fully up to speed on it. Plain and factual, using ONLY the material provided — never invent details.
+
+Cover:
+- What the customer wants (the use cases / requests)
+- What has been done, with key technical points and decisions (keep specifics: products, architecture, versions)
+- Current status of each request
+- Open items and next steps still outstanding
+
+When the scope holds several requests, open with a one-line overall picture, then a short section per request (lead with its TR ID when it has one). Keep it tight — no praise or filler.
+
+=== SCOPE ===
+{{scope}}
+
+=== REQUESTS IN SCOPE ===
+{{requests}}
+{{previous}}
+=== {{entriesLabel}} ===
+{{entries}}`;
+
 export function defaultSettings(): Settings {
   return {
     greenDays: 3, yellowDays: 5, archiveDays: 30, autoBackfillHours: 24,
@@ -468,6 +898,11 @@ export function defaultSettings(): Settings {
         'What patterns across the period are worth calling out — wins, losses, and what I learned?',
       ],
     }],
+    updateDueWeekday: 4,
+    updateCadence: 'weekly',
+    logPostedUpdates: true,
+    updateTmpl: DEFAULT_UPDATE_TMPL,
+    summaryTmpl: DEFAULT_SUMMARY_TMPL,
     custTmpl: DEFAULT_CUST_TMPL,
     execTmpl: DEFAULT_EXEC_TMPL,
     evalTmpl: DEFAULT_EVAL_TMPL,
@@ -491,6 +926,7 @@ const SETTINGS_KEYS = new Set<keyof Settings>([
   'roles', 'outcomes', 'themes', 'officialTag',
   'model', 'digestModel', 'embedModel',
   'ctxTokens', 'fastCtxTokens', 'reviewReserveTokens', 'reviewMaxCalls', 'questionSets',
+  'updateDueWeekday', 'updateCadence', 'logPostedUpdates', 'updateTmpl', 'summaryTmpl',
   'custTmpl', 'execTmpl', 'evalTmpl', 'trrDigestTmpl', 'reviewTmpl', 'reviewMapTmpl',
 ]);
 
@@ -518,10 +954,12 @@ export function seededTrrIds(): string[] {
 /** Delete exactly the demo/seed TRs (cascades interactions, digests, history, embeddings). */
 export function removeSeedData(): number {
   const ids = seededTrrIds();
-  const del = db.prepare('DELETE FROM trrs WHERE id = ?');
+  const r = db.prepare(`SELECT value FROM settings WHERE key = '_seedCustomerIds'`).get() as { value: string } | undefined;
+  const custIds = r ? JSON.parse(r.value) as string[] : [];
   db.transaction(() => {
-    for (const id of ids) del.run(id);
-    db.prepare(`DELETE FROM settings WHERE key = '_seedTrrIds'`).run();
+    for (const id of ids) deleteTrr(id);
+    for (const id of custIds) deleteCustomer(id); // no-op if the user has since added TRs to it
+    db.prepare(`DELETE FROM settings WHERE key IN ('_seedTrrIds', '_seedCustomerIds')`).run();
   })();
   return ids.length;
 }
@@ -529,20 +967,26 @@ export function removeSeedData(): number {
 /** Wipe ALL tracked data (TRs, interactions, digests, reports, reviews). Settings survive. */
 export function eraseAllData(): void {
   db.transaction(() => {
-    db.prepare('DELETE FROM trrs').run(); // cascades interactions/digests/history/embeddings
+    db.prepare('UPDATE trrs SET parent_id = NULL').run();
+    db.prepare('DELETE FROM trrs').run(); // cascades interactions/digests/history/embeddings/links/updates
+    db.prepare('DELETE FROM opportunities').run();
+    db.prepare('DELETE FROM customers').run();
+    db.prepare('DELETE FROM summaries').run();
     db.prepare('DELETE FROM period_reports').run();
     db.prepare('DELETE FROM reviews').run();
-    db.prepare(`DELETE FROM settings WHERE key = '_seedTrrIds'`).run();
+    db.prepare(`DELETE FROM settings WHERE key IN ('_seedTrrIds', '_seedCustomerIds')`).run();
   })();
 }
 
 // --- Counts ----------------------------------------------------------------
 
-export function counts(): { trrs: number; interactions: number; digests: number } {
+export function counts(): { trrs: number; interactions: number; digests: number; customers: number; opportunities: number } {
   const c = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
   return {
     trrs: c('SELECT count(*) n FROM trrs'),
     interactions: c('SELECT count(*) n FROM interactions'),
     digests: c('SELECT count(*) n FROM digests'),
+    customers: c('SELECT count(*) n FROM customers'),
+    opportunities: c('SELECT count(*) n FROM opportunities'),
   };
 }

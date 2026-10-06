@@ -28,15 +28,22 @@ Stop, don't add data, and check the volume mount before anything else.
 curl -s -X POST http://localhost:3000/data/backup-now
 #    Snapshots land in  data/backups/*.db  on the volume (VACUUM INTO).
 
-# 2. Get the new code.
+# 2. Look for local edits BEFORE pulling. `git reset --hard` silently discards
+#    any change to a tracked file — a hand-tuned docker-compose.yml, a port,
+#    an AI_URL. Keep site settings in an untracked `.env` (or a
+#    docker-compose.override.yml), never in tracked files.
 cd /opt/trcc
+git status --short && git diff        # anything listed here will be LOST by step 3
+git stash                             # if there is — re-apply after (git stash pop)
+
+# 3. Get the new code.
 git fetch origin && git reset --hard origin/palo-alto     # or origin/main for the agnostic flavor
 
-# 3. Rebuild in place. The running container keeps serving until the new
+# 4. Rebuild in place. The running container keeps serving until the new
 #    image is built, then compose swaps it. The volume is reused.
 docker compose up -d --build
 
-# 4. Verify.
+# 5. Verify.
 docker compose ps                       # trcc = Up (healthy)
 curl -s http://localhost:3000/healthz   # {"ok":true,"trrs":N,"interactions":M,...}
 ```
@@ -44,6 +51,23 @@ curl -s http://localhost:3000/healthz   # {"ok":true,"trrs":N,"interactions":M,.
 Confirm the `trrs` / `interactions` counts match what you expect. Schema
 **migrations run automatically at boot** — they are versioned (`user_version`),
 forward-only, and idempotent, so restarting on the same or newer code is safe.
+
+## Upgrading to 3.0
+
+3.0 adds schema v6 (customers, opportunities, parent/child TRs, weekly updates,
+summaries). It is additive and runs automatically at boot, but it is
+forward-only, so **take the step-1 backup** — rolling back to 2.x means
+restoring it. After the upgrade:
+
+- `/healthz` reports `version: 3.0.0` and the same `trrs` / `interactions`
+  counts as before, plus `customers` and `opportunities`.
+- Every existing TR has a customer record. Check **Accounts** for duplicates
+  that differed by more than case or spacing ("Acme" vs "Acme Corp") and use
+  **Merge** on the customer page.
+- Set `TZ` (e.g. `TZ=America/New_York` in `.env`) so the weekly due day is
+  your local day, then choose the due day under Settings → Weekly updates.
+- Your saved prompt templates are untouched. The two new templates (weekly
+  update, summary to date) start at their defaults.
 
 ## Rollback
 
