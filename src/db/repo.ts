@@ -508,7 +508,7 @@ export function aiSafeText(i: Interaction): string {
 export function interactionsNeedingExec(limit: number): Interaction[] {
   return (db.prepare(`
     SELECT * FROM interactions
-    WHERE length(trim(note)) >= 40 AND ai_exec = '' AND source = '' AND sensitive = 0 ORDER BY date DESC LIMIT ?
+    WHERE length(trim(note)) >= 40 AND ai_exec = '' AND source <> 'update' AND sensitive = 0 ORDER BY date DESC LIMIT ?
   `).all(limit) as IntRow[]).map(toInteraction);
 }
 
@@ -1033,8 +1033,76 @@ export function eraseAllData(): void {
     db.prepare('DELETE FROM summaries').run();
     db.prepare('DELETE FROM period_reports').run();
     db.prepare('DELETE FROM reviews').run();
+    db.prepare('DELETE FROM imports').run();
     db.prepare(`DELETE FROM settings WHERE key IN ('_seedTrrIds', '_seedCustomerIds')`).run();
   })();
+}
+
+// --- Imports ---------------------------------------------------------------
+
+export interface ImportRecord {
+  id: string;
+  createdAt: string;
+  status: 'draft' | 'applied' | 'undone';
+  kind: 'table' | 'freeform';
+  label: string;
+  raw: string;
+  tableJson: string;
+  mappingJson: string;
+  optionsJson: string;
+  mapper: string;
+  note: string;
+  resultJson: string;
+  summary: string;
+  appliedAt: string;
+  undoneAt: string;
+}
+
+type ImportRow = {
+  id: string; created_at: string; status: string; kind: string; label: string; raw: string;
+  table_json: string; mapping_json: string; options_json: string; mapper: string; note: string;
+  result_json: string; summary: string; applied_at: string; undone_at: string;
+};
+const toImport = (r: ImportRow): ImportRecord => ({
+  id: r.id, createdAt: r.created_at, status: r.status as ImportRecord['status'], kind: r.kind as ImportRecord['kind'],
+  label: r.label, raw: r.raw, tableJson: r.table_json, mappingJson: r.mapping_json, optionsJson: r.options_json,
+  mapper: r.mapper, note: r.note, resultJson: r.result_json, summary: r.summary, appliedAt: r.applied_at, undoneAt: r.undone_at,
+});
+
+export function insertImport(i: Pick<ImportRecord, 'kind' | 'label' | 'raw' | 'tableJson' | 'mappingJson' | 'optionsJson' | 'mapper' | 'note'>): string {
+  const id = uid();
+  db.prepare(`INSERT INTO imports (id, created_at, kind, label, raw, table_json, mapping_json, options_json, mapper, note)
+    VALUES (@id, @createdAt, @kind, @label, @raw, @tableJson, @mappingJson, @optionsJson, @mapper, @note)`)
+    .run({ ...i, id, createdAt: new Date().toISOString() });
+  return id;
+}
+
+export function getImport(id: string): ImportRecord | null {
+  const r = db.prepare('SELECT * FROM imports WHERE id = ?').get(id) as ImportRow | undefined;
+  return r ? toImport(r) : null;
+}
+
+export function listImports(limit = 30): ImportRecord[] {
+  return (db.prepare('SELECT * FROM imports ORDER BY created_at DESC LIMIT ?').all(limit) as ImportRow[]).map(toImport);
+}
+
+export function updateImport(id: string, patch: Partial<Pick<ImportRecord, 'status' | 'mappingJson' | 'optionsJson' | 'resultJson' | 'summary' | 'appliedAt' | 'undoneAt'>>): void {
+  const cur = getImport(id);
+  if (!cur) return;
+  const n = { ...cur, ...patch };
+  db.prepare(`UPDATE imports SET status=@status, mapping_json=@mappingJson, options_json=@optionsJson,
+    result_json=@resultJson, summary=@summary, applied_at=@appliedAt, undone_at=@undoneAt WHERE id=@id`).run(n);
+}
+
+export function deleteImport(id: string): void {
+  db.prepare(`DELETE FROM imports WHERE id = ? AND status <> 'applied'`).run(id);
+}
+
+export function findTrrByExternalId(externalId: string): Trr | null {
+  const v = externalId.trim();
+  if (!v) return null;
+  const r = db.prepare('SELECT * FROM trrs WHERE external_id = ? COLLATE NOCASE ORDER BY num LIMIT 1').get(v) as TrrRow | undefined;
+  return r ? toTrr(r) : null;
 }
 
 // --- Counts ----------------------------------------------------------------

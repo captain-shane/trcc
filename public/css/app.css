@@ -428,3 +428,34 @@ details[open] > summary { margin-bottom: 8px; }
   .tnode > summary { gap: 6px; padding: 6px 2px; }
   .dash-row .badge.st-plain { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* Import */
+.imp-tools { margin: 8px 0; gap: 12px; }
+.imp-privacy { margin: 2px 0 10px 24px; }
+.imp-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 4px 18px; }
+.imp-list .imp-when { flex-shrink: 0; width: 120px; }
+.imp-map { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
+.imp-col { border: 1px solid var(--c2); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.imp-col select { width: 100%; }
+.imp-ignored { opacity: .55; }
+.imp-col-head { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.imp-samples { min-height: 3.6em; overflow: hidden; word-break: break-word; }
+.imp-opts { gap: 6px 18px; }
+.imp-items { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.imp-item { border: 1px solid var(--c2); border-left: 3px solid var(--c3); border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 3px; }
+.imp-create { border-left-color: var(--green); }
+.imp-update { border-left-color: #60a5fa; }
+.imp-error { border-left-color: var(--red); }
+.imp-skipped, .imp-unchanged { opacity: .6; }
+.imp-item-head { gap: 8px; flex-wrap: wrap; }
+.imp-nobox { width: 13px; }
+.imp-title { min-width: 0; }
+.imp-new { background: transparent; border: 1px solid var(--green); color: var(--green); }
+.imp-changes { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.imp-changes .old { text-decoration: line-through; color: var(--muted2); }
+.imp-warn { color: var(--yellow); }
+.imp-log { padding: 2px 0 2px 14px; }
+.imp-dup { opacity: .5; }
+.imp-apply { margin: 10px 0 16px; gap: 8px; }
+.imp-raw { max-height: 320px; overflow: auto; white-space: pre; font-size: 12px; }
+.imp-item-head input[type=checkbox] { width: auto; margin: 0; }

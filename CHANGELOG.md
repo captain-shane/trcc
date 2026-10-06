@@ -46,6 +46,18 @@ kept in sync — so existing data, settings, and templates carry over untouched.
   recent contact across the family — any active child means the request is
   being worked. The tooltip and card say which child carries it; children keep
   their own health, and stalled children are still counted on the parent card.
+- **Import from a paste** (⇪ Import, top right): copy rows out of Google Sheets
+  (or CSV / a Markdown table) and paste. Columns are matched by header name and,
+  with AI on, the local model suggests the mapping from the headers and five
+  trimmed sample rows; text that isn't a table at all is read by the model.
+  The preview shows every TR to be created or updated (matched by TR ID),
+  new customers and opportunities, parents and children, and each log. Every
+  column mapping and row can be changed before applying. Dates, statuses,
+  priorities and themes are normalised in code; a notes cell with dated lines
+  becomes one log per date; logs already on a TR are skipped, so the same sheet
+  can be pasted again safely; a blank cell never clears a field. An applied
+  import can be undone (TRs that gained activity since are kept). Imported logs
+  count toward a weekly update by their own date, not the day of the import.
 - **Dashboard views**: *Families* (parent cards with their children);
   *Customer grid* (one tile per customer, worst health first, TRs grouped by
   opportunity with health counts); *Tree* (collapsible Customer › Opportunity ›

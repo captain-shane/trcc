@@ -247,6 +247,29 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX idx_summaries_scope ON summaries(scope_kind, scope_id, generated_at);
   `,
+  // v7 — pasted/spreadsheet imports (3.0.0). A draft keeps the parsed table and
+  // the column mapping until it is applied; an applied import keeps what it
+  // created and what it changed, so it can be undone.
+  `
+  CREATE TABLE imports (
+    id          TEXT PRIMARY KEY,
+    created_at  TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'draft',   -- draft | applied | undone
+    kind        TEXT NOT NULL DEFAULT 'table',   -- table | freeform
+    label       TEXT NOT NULL DEFAULT '',
+    raw         TEXT NOT NULL DEFAULT '',
+    table_json  TEXT NOT NULL DEFAULT '{}',
+    mapping_json TEXT NOT NULL DEFAULT '[]',
+    options_json TEXT NOT NULL DEFAULT '{}',
+    mapper      TEXT NOT NULL DEFAULT '',        -- 'heuristic' or the model that suggested the mapping
+    note        TEXT NOT NULL DEFAULT '',
+    result_json TEXT NOT NULL DEFAULT '',
+    summary     TEXT NOT NULL DEFAULT '',
+    applied_at  TEXT NOT NULL DEFAULT '',
+    undone_at   TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX idx_imports_created ON imports(created_at);
+  `,
 ];
 
 export const MIGRATION_COUNT = MIGRATIONS.length;
