@@ -42,7 +42,7 @@ pages.get('/', (req, res) => {
   const group = g === 'customer' || g === 'flat' ? g : 'family';
   const backlog = repo.interactionsNeedingExec(500).length;
   const s = repo.getSettings();
-  const active = repo.listTrrs('active');
+  const active = repo.withFamilyActivity(repo.listTrrs('active'));
   const desk = buildDesk();
   const c = deskCounts(desk);
   res.send(views.dashboard(active, intsByTrr(), s, filter, backlog, {
@@ -90,8 +90,9 @@ pages.get('/trr/new', (req, res) => {
 });
 
 pages.get('/trr/:id', (req, res) => {
-  const t = repo.getTrr(req.params.id);
-  if (!t) return res.status(404).send(views.notFound());
+  const stored = repo.getTrr(req.params.id);
+  if (!stored) return res.status(404).send(views.notFound());
+  const t = repo.withFamilyActivity([stored])[0]!;
   const s = repo.getSettings();
   const children = repo.listChildren(t.id);
   const includeChildren = children.length > 0 && req.query.own !== '1';
@@ -128,21 +129,21 @@ pages.get('/interactions/:id/edit', (req, res) => {
 });
 
 pages.get('/accounts', (_req, res) => {
-  res.send(views.accountsPage(repo.listCustomers(), repo.listTrrs('all'), repo.listOpportunities(), repo.getSettings()));
+  res.send(views.accountsPage(repo.listCustomers(), repo.withFamilyActivity(repo.listTrrs('all')), repo.listOpportunities(), repo.getSettings()));
 });
 
 pages.get('/customer/:id', (req, res) => {
   const c = repo.getCustomer(req.params.id);
   if (!c) return res.status(404).send(views.notFound());
   res.send(views.customerPage(c, repo.listCustomers(), repo.listOpportunities(c.id),
-    repo.listTrrs('all').filter(t => t.customerId === c.id), repo.getSettings(), repo.listSummaries('customer', c.id)));
+    repo.withFamilyActivity(repo.listTrrs('all').filter(t => t.customerId === c.id)), repo.getSettings(), repo.listSummaries('customer', c.id)));
 });
 
 pages.get('/opp/:id', (req, res) => {
   const o = repo.getOpportunity(req.params.id);
   const c = o && repo.getCustomer(o.customerId);
   if (!o || !c) return res.status(404).send(views.notFound());
-  res.send(views.oppPage(o, c, repo.listTrrs('all').filter(t => t.opportunityId === o.id), repo.getSettings(),
+  res.send(views.oppPage(o, c, repo.withFamilyActivity(repo.listTrrs('all').filter(t => t.opportunityId === o.id)), repo.getSettings(),
     repo.listSummaries('opportunity', o.id)));
 });
 
@@ -163,12 +164,12 @@ pages.get('/digests', (_req, res) => {
 });
 
 pages.get('/stats', (_req, res) => {
-  res.send(views.stats(repo.listTrrs('all'), repo.allInteractions(), repo.getSettings()));
+  res.send(views.stats(repo.withFamilyActivity(repo.listTrrs('all')), repo.allInteractions(), repo.getSettings()));
 });
 
 pages.get('/reports', (_req, res) => {
   const s = repo.getSettings();
-  const act = repo.listTrrs('active');
+  const act = repo.withFamilyActivity(repo.listTrrs('active'));
   const byTrr = intsByTrr();
   const lines = act
     .sort((a, b) => (a.deactivated === b.deactivated ? 0 : a.deactivated ? 1 : -1))

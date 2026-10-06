@@ -41,7 +41,7 @@ Settings afterwards anyway.
   opportunity. One log can apply to several TRs (a call covering three child
   requests is recorded once and shows on all three)
 - **Dashboard** — Green/Yellow/Red health per TR from last-contact age, grouped
-  as families (parent + children, worst-child health rolled up), by customer,
+  as families (a parent is green while any child is active), by customer,
   or flat; short `#N` handles and TR IDs, instant filter box, deactivation with
   archive countdown
 - **Accounts** — the customer → opportunity → TR tree, with rename/merge for

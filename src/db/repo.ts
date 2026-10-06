@@ -219,6 +219,25 @@ export function childrenIndex(trrs: Trr[]): Map<string, Trr[]> {
   return m;
 }
 
+/**
+ * Health roll-up for display. A parent TR holds the project-management side of
+ * a request (assignments, resourcing, coordination) while the work is logged on
+ * its children — so a parent counts as actively worked when ANY child is. The
+ * returned copies give each parent the family's most recent contact, keeping its
+ * own in `ownLastContact`. Children are unchanged. View-only: never save these.
+ */
+export function withFamilyActivity(trrs: Trr[]): Trr[] {
+  const kids = childrenIndex(listTrrs('all'));
+  return trrs.map(t => {
+    let best = t.lastContact;
+    let via: Trr | undefined;
+    for (const k of kids.get(t.id) ?? []) {
+      if (k.lastContact && k.lastContact > best) { best = k.lastContact; via = k; }
+    }
+    return via ? { ...t, lastContact: best, ownLastContact: t.lastContact, activityVia: via.num } : t;
+  });
+}
+
 /** A TR plus its children (or just itself when it has none). */
 export function familyOf(id: string): Trr[] {
   const t = getTrr(id);

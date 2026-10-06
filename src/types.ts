@@ -60,7 +60,10 @@ export interface Trr {
   deactivated: boolean;
   deactivatedAt: string; // ISO datetime or ''
   createdAt: string;     // ISO datetime
-  lastContact: string;   // ISO date or ''
+  lastContact: string;   // ISO date or '' (for a parent in a view: the family's latest — see withFamilyActivity)
+  // View-only, set by withFamilyActivity on a parent whose child was contacted more recently:
+  ownLastContact?: string; // the parent's own last contact
+  activityVia?: number;    // #num of the child that carries the latest activity
 }
 
 export interface Interaction {
