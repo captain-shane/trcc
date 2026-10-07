@@ -59,7 +59,7 @@ summaries) and v7 (imports). Both are additive and run automatically at boot, bu
 they are forward-only, so **take the step-1 backup** — rolling back to 2.x means
 restoring it. After the upgrade:
 
-- `/healthz` reports `version: 3.0.0` and the same `trrs` / `interactions`
+- `/healthz` reports `version: 3.0.x` and the same `trrs` / `interactions`
   counts as before, plus `customers` and `opportunities`.
 - The dashboard offers the **2.x restructure** (also under Settings → Data):
   give an example of your TR IDs (e.g. `TRR123123`), tick the fields to search,
