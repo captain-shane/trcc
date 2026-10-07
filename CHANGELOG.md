@@ -10,6 +10,11 @@ that a user can observe are **minor**, not patch.
 
 ## [Unreleased]
 
+### Added
+- **`{{targetClose}}` in the weekly-update prompt**: the TR's target date (or
+  "not set"), so a prompt can ask for an expected completion date without the
+  model guessing one.
+
 ### Changed
 - **Demo data** is now a full showcase: 11 customers, 15 opportunities, parent
   TRs with child requests, the whole health spread, project-management notes
