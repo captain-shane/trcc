@@ -91,7 +91,8 @@ export function suggestShapes(fields: MigrateField[] = ['title', 'description', 
 
 function logsByTrr(): Map<string, string> {
   const m = new Map<string, string>();
-  for (const i of repo.allInteractions()) m.set(i.trrId, `${m.get(i.trrId) ?? ''}\n${i.note}`);
+  // Posted-update notes are written by the app ("…for cycle 2026-10-08"), not by the user: skip them.
+  for (const i of repo.allInteractions()) if (i.source !== 'update') m.set(i.trrId, `${m.get(i.trrId) ?? ''}\n${i.note}`);
   return m;
 }
 
