@@ -93,4 +93,11 @@ describe('restructure', () => {
     expect(shapes[0]!.trrs).toBe(3);             // TRR400100, trr-400101 and TRR400102 are one shape
     expect(shapes[0]!.example).toBe('TRR400100');
   });
+
+  it('ignores posted-update notes the app wrote itself', () => {
+    const t = flat({ customer: 'Gamma', title: 'Posted', description: '' });
+    repo.insertInteraction({ id: uid(), trrId: t, type: 'Note', date: '2026-10-08', note: '[official] Weekly update posted for cycle 2026-10-08:\nx',
+      aiExec: '', aiCust: '', sensitive: false, source: 'update', createdAt: new Date().toISOString() });
+    expect(mig.suggestShapes(['logs']).some(sh => sh.shape.startsWith('CYCLE'))).toBe(false);
+  });
 });

@@ -12,7 +12,7 @@ summaries, catch-up digests, period reports, and question-driven reviews —
 with **all AI running on your own local models — Ollama, LM Studio, or equivalent — or fully switched off**.
 Your data never leaves your network.
 
-![TR Command Center dashboard](docs/dashboard.png)
+![TR Command Center 3.0 — the customer grid](docs/dashboard.png)
 
 Built on three principles:
 
@@ -28,6 +28,104 @@ Built on three principles:
 3. **Deterministic before generative.** Stats, health states, and report
    numbers are computed in code. The model only ever writes narrative from
    those facts plus your tagged "official record" — it cannot invent totals.
+
+## What's new in 3.0
+
+2.x kept a flat list of requests. 3.0 tracks the work the way it is actually
+organised — customers, opportunities, programs, and the individual requests
+under them — and turns the weekly status update from a chore into a workflow.
+
+| | 2.x | 3.0 |
+|---|---|---|
+| **Structure** | One flat list; a TR's title doubled as its opportunity | Customer → Opportunity → parent TR → child TRs, each carrying its upstream **TR ID** |
+| **Dashboard** | One card per TR | Families, a customer grid, a collapsible tree, and a Requests view of just the TRs doing the work |
+| **Weekly updates** | Copy a 7-day roll-up off the Reports page | The **Update Desk**: who owes an update, a draft per TR ID (AI or plain) built from everything since the last *posted* one, regenerate, one paste-ready block, mark posted |
+| **Getting data in** | Type it in | **Paste rows from Google Sheets** / CSV (or plain text the local model reads), preview every change, undo |
+| **Catching up** | A digest per TR | A versioned, incremental **summary to date** for a TR, a program, an opportunity, or a customer |
+| **Logs** | One log, one TR; "sensitive" was only a badge | One log can cover several TRs; 🚩 **flagged logs are never passed to any model** |
+| **History** | Field changes per TR | Plus an opportunity audit trail: moves, renames, and stage changes |
+| **Upgrading** | — | A one-time **restructure wizard** builds the hierarchy from your 2.x TRs and fills TR IDs from your notes — previewed, and undoable |
+
+Every change is in the [CHANGELOG](CHANGELOG.md); upgrade steps are in
+[UPGRADE.md](UPGRADE.md). Screenshots use the vendor-neutral demo data from the `main` flavor.
+
+### See the portfolio the way it is organised
+
+<table>
+<tr><th>2.2 — one card per TR</th><th>3.0 — customer › opportunity › parent › child</th></tr>
+<tr><td valign="top"><img src="docs/screenshots/v2-dashboard.png" alt="2.2 dashboard: a flat grid of TR cards"></td>
+<td valign="top"><img src="docs/screenshots/dashboard-tree.png" alt="3.0 dashboard tree view"></td></tr>
+</table>
+
+Health still comes from last-contact age, and a parent is green while any of
+its children is being worked. Pick the view that suits the moment: families,
+a tile per customer, the full tree, or only the requests.
+
+### The Update Desk
+
+![Update Desk: overdue, due, drafted and posted updates for the cycle](docs/screenshots/update-desk.png)
+
+Every TR ID owes an update each cycle (Thursday by default). The desk shows what
+is overdue, due, drafted, or posted; drafts combine everything logged since
+that TR's last posted update, so a missed week rolls forward instead of being
+lost. Draft them one at a time or all at once, edit or regenerate any of them,
+copy the whole cycle as one block, and mark them posted. The prompt is yours to
+shape to whatever format your tracking system wants.
+
+### Programs: a parent TR and its requests
+
+![A parent TR with four child requests, the family's log, and its summary to date](docs/screenshots/parent-tr.png)
+
+The parent carries the program-management side — escalations, resourcing,
+coordination — while the work is logged on its children. Its page shows the
+whole family's activity, which child each log came from, and a summary to date
+that is revised incrementally as new entries arrive.
+
+### Opportunities, with a summary and an audit trail
+
+![Opportunity page with its TRs, summary to date, and audit trail](docs/screenshots/opportunity.png)
+
+### Import from a paste
+
+![Import preview: columns mapped from a Google Sheets paste, every new and updated TR listed before anything is saved](docs/screenshots/import-preview.png)
+
+Copy rows out of Google Sheets and paste. Columns are matched for you (by
+header, or by the local model), and the preview lists every TR, log, customer,
+and opportunity before anything is saved. Pasting the same sheet again only
+adds what is new, and an applied import can be undone.
+
+### Coming from 2.x
+
+<table>
+<tr><th>The restructure wizard</th><th>After: the same TRs as a hierarchy</th></tr>
+<tr><td valign="top"><img src="docs/screenshots/restructure-wizard.png" alt="2.x restructure wizard finding TR IDs in the notes"></td>
+<td valign="top"><img src="docs/screenshots/restructure-after.png" alt="Dashboard tree after the restructure"></td></tr>
+</table>
+
+Give it one example of your TR IDs (say `TRR123123`) and tick the fields to
+search. It finds each TR's ID in your notes, turns each title into an
+opportunity under its customer, and gives every opportunity a parent with the
+requests as its children. Review every row first; undo it afterwards if you
+change your mind.
+
+### On a phone
+
+<p>
+<img src="docs/screenshots/mobile-dashboard.png" alt="Customer grid on a phone" width="300">
+&nbsp;
+<img src="docs/screenshots/mobile-update-desk.png" alt="Update Desk on a phone" width="300">
+</p>
+
+## Flavors
+
+- **`main`** — vendor-neutral defaults: generic value themes, `official` as
+  the official-record tag, and neutral demo data. Start here.
+- **`palo-alto`** — the same app with Palo Alto Networks SASE defaults
+  (Prisma Access / SD-WAN / ADEM themes, `sfdc` tag, SASE-flavored demo
+  data) for SE teams in that ecosystem.
+
+Only defaults and demo data differ — and every default is editable in
+Settings afterwards anyway.
 
 ## Features
 

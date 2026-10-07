@@ -10,6 +10,11 @@ that a user can observe are **minor**, not patch.
 
 ## [Unreleased]
 
+### Fixed
+- The 2.x restructure wizard no longer reads the app's own posted-update notes
+  when suggesting TR ID shapes or searching logs (they suggested a bogus
+  "CYCLE 2026" shape).
+
 ## [3.0.2] - 2026-10-07
 
 ### Security
