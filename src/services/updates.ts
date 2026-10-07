@@ -169,7 +169,8 @@ export async function draftUpdate(trrId: string, cycleDue: string, opts: { useAi
   const t = row.trr;
   let text = plainDraft(row);
   let model = '';
-  if ((opts.useAi ?? true) && s.aiEnabled && row.entries.length > 0) {
+  // A quiet window still goes through the prompt, so the draft keeps the prompt's format.
+  if ((opts.useAi ?? true) && s.aiEnabled) {
     const vars = {
       externalId: t.externalId || `#${t.num}`, customer: t.customer, opportunity: row.opp?.name ?? '—',
       title: t.title, parent: row.parent ? `${row.parent.externalId || `#${row.parent.num}`} ${row.parent.title}` : '—',
@@ -177,7 +178,9 @@ export async function draftUpdate(trrId: string, cycleDue: string, opts: { useAi
       from: localDay(row.windowFrom), to: localDay(), count: row.entries.length, entries: '',
     };
     const budget = usableChars(s.ctxTokens, s.reviewReserveTokens) - fillTemplate(s.updateTmpl, vars).length - 200;
-    vars.entries = packEntries(row.entries.map(i => entryLine(i, t)), Math.max(2_000, budget));
+    vars.entries = row.entries.length
+      ? packEntries(row.entries.map(i => entryLine(i, t)), Math.max(2_000, budget))
+      : '(none — nothing has been logged since the last update)';
     const r = await generateWithFallback(fillTemplate(s.updateTmpl, vars), s.digestModel, s.model,
       240_000, s.ctxTokens, s.fastCtxTokens);
     if (r.text.trim()) {
@@ -189,6 +192,14 @@ export async function draftUpdate(trrId: string, cycleDue: string, opts: { useAi
     trrId, cycleDue, windowFrom: row.windowFrom, windowTo: new Date().toISOString(),
     interactions: row.entries.length, text, model,
   });
+}
+
+/** Regenerate a posted update: back to draft (record note removed), then a fresh AI draft. */
+export async function regenerateUpdate(id: number): Promise<TrUpdate | null> {
+  const u = repo.getUpdateById(id);
+  if (!u) return null;
+  if (u.status === 'posted') unpostUpdate(u.id);
+  return draftUpdate(u.trrId, u.cycleDue);
 }
 
 /** Save hand-written text as this cycle's draft (creating the row if needed). */

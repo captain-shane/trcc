@@ -384,7 +384,7 @@ export function updateRowCard(r: DeskRow, cycleDue: string, aiEnabled: boolean, 
     </form>` : ''}
     <div class="row upd-actions" x-show="!edit">
       ${r.state !== 'posted' ? `
-        ${aiEnabled && r.entries.length ? `<button class="btn btn-sm" hx-post="${base}/draft" hx-target="#${rid}" hx-swap="outerHTML" hx-indicator="#${rid} .upd-ind"
+        ${aiEnabled ? `<button class="btn btn-sm" hx-post="${base}/draft" hx-target="#${rid}" hx-swap="outerHTML" hx-indicator="#${rid} .upd-ind"
           ${u?.edited ? 'hx-confirm="Replace your edited draft with a fresh AI draft?"' : ''}>🤖 ${u ? 'Redraft' : 'Draft'}</button>` : ''}
         <button class="btn btn-outline btn-sm" hx-post="${base}/draft?plain=1" hx-target="#${rid}" hx-swap="outerHTML"
           ${u ? 'hx-confirm="Replace the current draft with a plain list of the entries?"' : ''}>${r.entries.length ? '≡ Plain draft' : '“No change” draft'}</button>
@@ -392,6 +392,8 @@ export function updateRowCard(r: DeskRow, cycleDue: string, aiEnabled: boolean, 
       ` : ''}
       ${u?.text ? `<button class="btn btn-outline btn-sm" @click="navigator.clipboard.writeText($refs.txt.innerText).then(()=>{$el.textContent='✓ copied'; setTimeout(()=>$el.textContent='📋 copy',1200)})">📋 copy</button>` : ''}
       ${editable && u!.text.trim() ? `<button class="btn btn-sm btn-post" hx-post="/updates/u/${u!.id}/post" hx-target="#${rid}" hx-swap="outerHTML">✓ Mark posted</button>` : ''}
+      ${u?.status === 'posted' && aiEnabled ? `<button class="btn btn-outline btn-sm" hx-post="/updates/u/${u.id}/regen" hx-target="#${rid}" hx-swap="outerHTML" hx-indicator="#${rid} .upd-ind"
+          hx-confirm="Regenerate this posted update with AI? It goes back to draft (the logged record note is removed) — mark it posted again when it reads right.">🤖 Regenerate</button>` : ''}
       ${u?.status === 'posted' ? `<button class="btn btn-outline btn-sm" hx-post="/updates/u/${u.id}/unpost" hx-target="#${rid}" hx-swap="outerHTML" hx-confirm="Move this back to draft? The logged record note is removed.">↶ Unpost</button>` : ''}
       <span class="upd-ind htmx-indicator small muted2">⏳ drafting on local model…</span>
       ${opts.flash ? `<span class="small hl">${esc(opts.flash)}</span>` : ''}
