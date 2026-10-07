@@ -11,6 +11,12 @@ that a user can observe are **minor**, not patch.
 ## [Unreleased]
 
 ### Added
+- **🤖 Regenerate on posted updates** (Update Desk): moves the update back to
+  draft, removes its logged record note and redrafts it with AI — handy after
+  changing the weekly-update prompt. Post it again when it reads right.
+- **AI drafts for quiet TRs**: a TR with nothing new in its window now gets the
+  🤖 Draft button too, and bulk drafting sends it through the prompt, so every
+  update comes out in the prompt's format (the plain "no change" draft stays).
 - **`{{targetClose}}` in the weekly-update prompt**: the TR's target date (or
   "not set"), so a prompt can ask for an expected completion date without the
   model guessing one.

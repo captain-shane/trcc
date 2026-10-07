@@ -7,7 +7,7 @@ import { HierarchyError } from '../db/repo.js';
 import { getJob } from '../services/jobs.js';
 import { planSummary, startSummaryJob } from '../services/summary.js';
 import {
-  aggregateText, buildDesk, deskCounts, deskRow, draftUpdate, plainDraft, postUpdate,
+  aggregateText, buildDesk, deskCounts, deskRow, draftUpdate, plainDraft, postUpdate, regenerateUpdate,
   saveDraftText, startBulkDrafts, unpostUpdate,
 } from '../services/updates.js';
 import { isValidDay } from '../services/cycle.js';
@@ -672,6 +672,18 @@ actions.post('/updates/u/:id/post', (req, res) => {
   const u = postUpdate(Number(req.params.id));
   if (!u) return res.status(404).send('');
   sendRow(res, u.trrId, u.cycleDue, { flash: 'posted' });
+});
+
+actions.post('/updates/u/:id/regen', async (req, res) => {
+  const u = repo.getUpdateById(Number(req.params.id));
+  if (!u) return res.status(404).send('');
+  if (!repo.getSettings().aiEnabled) return sendRow(res, u.trrId, u.cycleDue, { error: 'AI is off — turn it on in Settings to regenerate.' });
+  try {
+    await regenerateUpdate(u.id);
+    sendRow(res, u.trrId, u.cycleDue, { flash: u.status === 'posted' ? 'regenerated — back to draft, post it again when ready' : 'regenerated' });
+  } catch (e) {
+    sendRow(res, u.trrId, u.cycleDue, { error: `Regenerate failed: ${(e as Error).message}` });
+  }
 });
 
 actions.post('/updates/u/:id/unpost', (req, res) => {

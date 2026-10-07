@@ -231,6 +231,19 @@ describe('update desk', () => {
     await upd.draftUpdate(t.id, due());
     expect(repo.getUpdateById(d.id)!.text).toBe('hand written');
   });
+
+  it('regenerating a posted update puts it back to draft with fresh text and drops the record note', async () => {
+    const t = base({ customer: 'Regen Co', title: 'r' }); repo.insertTrr(t);
+    log(t.id, 1);
+    const d = await upd.draftUpdate(t.id, due());
+    repo.editUpdateText(d.id, 'old format');
+    upd.postUpdate(d.id);
+    const u = await upd.regenerateUpdate(d.id);
+    expect(u!.id).toBe(d.id);
+    expect(u!.status).toBe('draft');
+    expect(u!.text).not.toBe('old format');
+    expect(repo.listInteractions(t.id).filter(i => i.source === 'update')).toHaveLength(0);
+  });
 });
 
 describe('summary planning', () => {
