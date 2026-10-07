@@ -10,6 +10,13 @@ that a user can observe are **minor**, not patch.
 
 ## [Unreleased]
 
+### Security
+- Dependencies: `proxy-addr` 2.0.8 and `qs` 6.16.0 (runtime; neither advisory
+  was reachable — no `trust proxy`, `urlencoded({ extended: false })`), and
+  `vitest` 5 for the test tooling (clears the tinypool, @vitest/mocker,
+  postcss and source-map-js advisories; none of them ship in the image).
+  `npm audit`: 0 vulnerabilities.
+
 ## [3.0.1] - 2026-10-07
 
 ### Added
