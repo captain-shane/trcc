@@ -115,7 +115,7 @@ function dashRow(t: Trr, child: boolean, ints: IntsByTrr, s: Settings, wide: boo
   const last = its[0];
   const closed = s.closedStatuses.includes(t.status);
   return `<a class="tree-row dash-row ${child ? 'tree-child' : ''} ${closed || t.deactivated ? 'tree-closed' : ''}" href="/trr/${esc(t.id)}">
-    <span class="rag-glyph rag-g-${r}" aria-label="${esc(RAG_LABEL[r])}">${RAG_SYMBOL[r]}</span>
+    ${closed || t.deactivated ? '<span class="rag-glyph muted2" aria-label="closed">○</span>' : `<span class="rag-glyph rag-g-${r}" aria-label="${esc(RAG_LABEL[r])}">${RAG_SYMBOL[r]}</span>`}
     ${child ? '<span class="muted3" aria-hidden="true">↳</span>' : ''}
     <span class="trr-num">#${t.num}</span>${trIdBadge(t)}
     <span class="tree-title">${esc(t.title)}</span>
@@ -350,7 +350,11 @@ function childrenCard(t: Trr, kids: Trr[], s: Settings): string {
     ${kids.length === 0 ? '<div class="small muted2">None yet. A child TR inherits this request\'s customer and opportunity.</div>' : ''}
     ${kids.map(k => {
       const r = rag(k.lastContact, s);
-      return `<a class="child-row" href="/trr/${esc(k.id)}"><span class="rag-glyph rag-g-${r}">${RAG_SYMBOL[r]}</span>
+      // closed or deactivated work has no health to show
+      const done = k.deactivated || s.closedStatuses.includes(k.status);
+      return `<a class="child-row ${done ? 'tree-closed' : ''}" href="/trr/${esc(k.id)}">${done
+        ? '<span class="rag-glyph muted2" aria-label="closed">○</span>'
+        : `<span class="rag-glyph rag-g-${r}" aria-label="${esc(RAG_LABEL[r])}">${RAG_SYMBOL[r]}</span>`}
         <span class="trr-num">#${k.num}</span>${trIdBadge(k)}<span class="child-title">${esc(k.title)}</span>${statusBadge(k.status)}</a>`;
     }).join('')}
   </div>`;
@@ -505,7 +509,7 @@ function treeRows(list: Trr[], kids: Map<string, Trr[]>, s: Settings): string {
     const r = rag(t.lastContact, s);
     const closed = s.closedStatuses.includes(t.status);
     return `<a class="tree-row ${child ? 'tree-child' : ''} ${closed || t.deactivated ? 'tree-closed' : ''}" href="/trr/${esc(t.id)}">
-      <span class="rag-glyph rag-g-${r}" aria-label="${esc(RAG_LABEL[r])}">${RAG_SYMBOL[r]}</span>
+      ${closed || t.deactivated ? '<span class="rag-glyph muted2" aria-label="closed">○</span>' : `<span class="rag-glyph rag-g-${r}" aria-label="${esc(RAG_LABEL[r])}">${RAG_SYMBOL[r]}</span>`}
       ${child ? '<span class="muted3" aria-hidden="true">↳</span>' : ''}
       <span class="trr-num">#${t.num}</span>${trIdBadge(t)}
       <span class="tree-title">${esc(t.title)}</span>${statusBadge(t.status)}
@@ -555,6 +559,20 @@ export function accountsPage(customers: Customer[], trrs: Trr[], opps: Opportuni
     }).join('')}
     </div>
   </div>`);
+}
+
+/** A rename or stage change is written on every TR in the opportunity: show it once, listing the TRs. */
+function auditGroups(audit: (TrrHistoryEntry & { num: number })[]): { day: string; field: string; oldValue: string; newValue: string; trs: { id: string; num: number }[] }[] {
+  const out: ReturnType<typeof auditGroups> = [];
+  for (const h of audit) {
+    const day = h.changedAt.slice(0, 10);
+    const field = h.field.replace(/ \(via parent #\d+\)$/, '');
+    const g = out.find(x => x.day === day && x.field === field && x.oldValue === h.oldValue && x.newValue === h.newValue);
+    if (g) { if (!g.trs.some(t => t.id === h.trrId)) g.trs.push({ id: h.trrId, num: h.num }); }
+    else out.push({ day, field, oldValue: h.oldValue, newValue: h.newValue, trs: [{ id: h.trrId, num: h.num }] });
+  }
+  for (const g of out) g.trs.sort((a, b) => a.num - b.num);
+  return out;
 }
 
 export function customerPage(c: Customer, all: Customer[], opps: Opportunity[], trrs: Trr[], s: Settings, versions: ScopeSummary[]): string {
@@ -643,12 +661,12 @@ export function oppPage(o: Opportunity, c: Customer, trrs: Trr[], s: Settings, v
     <aside class="detail-side">
       ${summaryPanel('opportunity', o.id, versions, s.aiEnabled, { open: true })}
       <details class="card" ${audit.length ? 'open' : ''}>
-        <summary><strong>📜 Audit trail</strong> <span class="small muted2">(${audit.length}) — TRs moved in/out, renames, stage changes</span></summary>
-        ${audit.length === 0 ? '<div class="small muted2">No changes recorded yet.</div>' : `<div class="timeline">${audit.map(h => `
+        <summary><strong>📜 Audit trail</strong> <span class="small muted2">(${auditGroups(audit).length}) — TRs moved in/out, renames, stage changes</span></summary>
+        ${audit.length === 0 ? '<div class="small muted2">No changes recorded yet.</div>' : `<div class="timeline">${auditGroups(audit).map(g => `
           <div class="timeline-row">
-            <span class="timeline-date">${esc(h.changedAt.slice(0, 10))}</span>
-            <span class="timeline-body"><a class="hl" href="/trr/${esc(h.trrId)}">#${h.num}</a> ${esc(h.field)}:
-              <span class="old">${esc(h.oldValue || '—')}</span> → <span class="hl">${esc(h.newValue || '—')}</span></span>
+            <span class="timeline-date">${esc(g.day)}</span>
+            <span class="timeline-body">${g.trs.map(t => `<a class="hl" href="/trr/${esc(t.id)}">#${t.num}</a>`).join(', ')} ${esc(g.field.replace(/^opportunity stage \(.*\)$/, 'opportunity stage'))}:
+              <span class="old">${esc(g.oldValue || '—')}</span> → <span class="hl">${esc(g.newValue || '—')}</span></span>
           </div>`).join('')}</div>`}
       </details>
       <div class="card">

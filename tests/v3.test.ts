@@ -362,5 +362,8 @@ describe('demo data', () => {
     expect(c.trrs).toBe(0);
     expect(c.customers).toBe(0);
     expect(c.opportunities).toBe(0);
+    expect(repo.listImports().length).toBe(0);
+    expect(repo.listPeriodReports().length).toBe(0);
+    expect(repo.listSummaries('customer', 'x').length).toBe(0);
   });
 });
