@@ -1313,7 +1313,7 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
       ${field('Exec summary (per note)', `<textarea name="execTmpl" rows="8" class="mono">${esc(s.execTmpl)}</textarea>`)}
       ${field('Period self-eval (digest)', `<textarea name="evalTmpl" rows="8" class="mono">${esc(s.evalTmpl)}</textarea>`)}
       ${field('Per-TRR catch-up (digest — auto-run on archive)', `<textarea name="trrDigestTmpl" rows="8" class="mono">${esc(s.trrDigestTmpl)}</textarea>`)}
-      ${field('Weekly update ({{externalId}} {{customer}} {{opportunity}} {{title}} {{parent}} {{status}} {{from}} {{to}} {{count}} {{entries}})', `<textarea name="updateTmpl" rows="8" class="mono">${esc(s.updateTmpl)}</textarea>`)}
+      ${field('Weekly update ({{externalId}} {{customer}} {{opportunity}} {{title}} {{parent}} {{status}} {{targetClose}} {{from}} {{to}} {{count}} {{entries}})', `<textarea name="updateTmpl" rows="8" class="mono">${esc(s.updateTmpl)}</textarea>`)}
       ${field('Summary to date ({{scope}} {{requests}} {{previous}} {{entriesLabel}} {{entries}})', `<textarea name="summaryTmpl" rows="8" class="mono">${esc(s.summaryTmpl)}</textarea>`)}
       <div class="small muted" style="margin-top:6px">The review engine runs in two stages: <strong>map</strong> pulls question-relevant evidence out of each record slice, then <strong>reduce</strong> writes the answer from everything gathered.</div>
       ${field('Review — reduce / synthesis ({{questions}} {{facts}} {{official}} {{findings}} {{instructions}})', `<textarea name="reviewTmpl" rows="8" class="mono">${esc(s.reviewTmpl)}</textarea>`)}

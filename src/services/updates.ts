@@ -173,7 +173,8 @@ export async function draftUpdate(trrId: string, cycleDue: string, opts: { useAi
     const vars = {
       externalId: t.externalId || `#${t.num}`, customer: t.customer, opportunity: row.opp?.name ?? '—',
       title: t.title, parent: row.parent ? `${row.parent.externalId || `#${row.parent.num}`} ${row.parent.title}` : '—',
-      status: t.status, from: localDay(row.windowFrom), to: localDay(), count: row.entries.length, entries: '',
+      status: t.status, targetClose: t.targetClose || 'not set',
+      from: localDay(row.windowFrom), to: localDay(), count: row.entries.length, entries: '',
     };
     const budget = usableChars(s.ctxTokens, s.reviewReserveTokens) - fillTemplate(s.updateTmpl, vars).length - 200;
     vars.entries = packEntries(row.entries.map(i => entryLine(i, t)), Math.max(2_000, budget));

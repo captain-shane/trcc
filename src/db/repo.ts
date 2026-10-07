@@ -896,7 +896,7 @@ const DEFAULT_UPDATE_TMPL = `Write the weekly status update for ONE technical re
 
 Rules: factual only, use ONLY the entries below. Never invent outcomes, dates, or next steps. Keep technical specifics (products, versions, sites, counts).
 
-TR ID: {{externalId}} | Customer: {{customer}} | Opportunity: {{opportunity}} | Request: {{title}} | Parent request: {{parent}} | Status: {{status}}
+TR ID: {{externalId}} | Customer: {{customer}} | Opportunity: {{opportunity}} | Request: {{title}} | Parent request: {{parent}} | Status: {{status}} | Target date: {{targetClose}}
 Period: {{from}} to {{to}}
 
 === ENTRIES SINCE THE LAST UPDATE ({{count}}) ===
