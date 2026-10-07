@@ -10,6 +10,8 @@ that a user can observe are **minor**, not patch.
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-10-07
+
 ### Security
 - Dependencies: `proxy-addr` 2.0.8 and `qs` 6.16.0 (runtime; neither advisory
   was reachable — no `trust proxy`, `urlencoded({ extended: false })`), and
