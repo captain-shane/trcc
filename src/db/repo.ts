@@ -374,9 +374,9 @@ export function opportunityAudit(names: string[]): (TrrHistoryEntry & { num: num
   const ph = names.map(() => '?').join(',');
   return (db.prepare(`
     SELECT h.*, t.num, t.title FROM trr_history h JOIN trrs t ON t.id = h.trr_id
-    WHERE h.field LIKE 'opportunity%' AND (h.old_value IN (${ph}) OR h.new_value IN (${ph}))
+    WHERE h.field LIKE 'opportunity%' AND (h.old_value IN (${ph}) OR h.new_value IN (${ph}) OR h.field IN (${ph}))
     ORDER BY h.changed_at DESC, h.id DESC
-  `).all(...names, ...names) as { id: number; trr_id: string; changed_at: string; field: string; old_value: string; new_value: string; num: number; title: string }[])
+  `).all(...names, ...names, ...names.map(n => `opportunity stage (${n})`)) as { id: number; trr_id: string; changed_at: string; field: string; old_value: string; new_value: string; num: number; title: string }[])
     .map(r => ({ id: r.id, trrId: r.trr_id, changedAt: r.changed_at, field: r.field, oldValue: r.old_value, newValue: r.new_value, num: r.num, title: r.title }));
 }
 
@@ -1015,10 +1015,16 @@ export function removeSeedData(): number {
   const ids = seededTrrIds();
   const r = db.prepare(`SELECT value FROM settings WHERE key = '_seedCustomerIds'`).get() as { value: string } | undefined;
   const custIds = r ? JSON.parse(r.value) as string[] : [];
+  const x = db.prepare(`SELECT value FROM settings WHERE key = '_seedExtra'`).get() as { value: string } | undefined;
+  const extra = x ? JSON.parse(x.value) as { reports?: number[]; imports?: string[] } : {};
   db.transaction(() => {
-    for (const id of ids) deleteTrr(id);
+    // children first, so no parent is deleted out from under a seeded child
+    const rows = ids.map(id => getTrr(id)).filter((t): t is Trr => !!t).sort((a, b) => (a.parentId ? 0 : 1) - (b.parentId ? 0 : 1));
+    for (const t of rows) deleteTrr(t.id);
     for (const id of custIds) deleteCustomer(id); // no-op if the user has since added TRs to it
-    db.prepare(`DELETE FROM settings WHERE key IN ('_seedTrrIds', '_seedCustomerIds')`).run();
+    for (const id of extra.reports ?? []) db.prepare('DELETE FROM period_reports WHERE id = ?').run(id);
+    for (const id of extra.imports ?? []) db.prepare('DELETE FROM imports WHERE id = ?').run(id);
+    db.prepare(`DELETE FROM settings WHERE key IN ('_seedTrrIds', '_seedCustomerIds', '_seedExtra')`).run();
   })();
   return ids.length;
 }
@@ -1034,7 +1040,7 @@ export function eraseAllData(): void {
     db.prepare('DELETE FROM period_reports').run();
     db.prepare('DELETE FROM reviews').run();
     db.prepare('DELETE FROM imports').run();
-    db.prepare(`DELETE FROM settings WHERE key IN ('_seedTrrIds', '_seedCustomerIds')`).run();
+    db.prepare(`DELETE FROM settings WHERE key IN ('_seedTrrIds', '_seedCustomerIds', '_seedExtra')`).run();
   })();
 }
 

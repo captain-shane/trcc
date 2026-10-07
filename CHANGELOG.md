@@ -10,6 +10,21 @@ that a user can observe are **minor**, not patch.
 
 ## [Unreleased]
 
+### Changed
+- **Demo data** is now a full showcase: 11 customers, 15 opportunities, parent
+  TRs with child requests, the whole health spread, project-management notes
+  on parents, flagged and linked logs, an applied import, four weekly cycles of
+  updates (posted, drafts, due and overdue), summaries to date with earlier
+  versions, digests for closed work, a saved period report and an audit trail.
+  The story lives in the flavor's `seed.ts`; a shared engine builds it, and
+  "Remove demo data" removes all of it.
+- **Opportunity audit trail** shows a rename or stage change once, listing the
+  TRs it applied to, and now includes stage changes.
+
+### Fixed
+- Closed and deactivated TRs show ○ instead of a health colour in the child
+  list, the Accounts tree and the dashboard grid and tree.
+
 ## [3.0.0] - 2026-10-06
 
 The data model grows a hierarchy, and weekly reporting becomes a workflow.

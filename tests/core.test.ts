@@ -26,8 +26,9 @@ describe('seed + repo', () => {
 
   it('sets last_contact from interactions', () => {
     for (const t of repo.listTrrs('all')) {
-      const ints = repo.listInteractions(t.id);
-      if (ints.length) expect(t.lastContact).toBe(ints[0]!.date); // list is date-desc
+      // a posted-update record is not contact; a log linked from another TR is
+      const ints = repo.listInteractions(t.id).filter(i => i.source !== 'update');
+      if (ints.length) expect(t.lastContact >= ints[0]!.date).toBe(true); // list is date-desc
     }
   });
 
@@ -132,7 +133,8 @@ describe('review scoping', () => {
     const all = repo.listTrrs('all');
     const withTheme = all.find(t => t.valueThemes.length > 0)!;
     const theme = withTheme.valueThemes[0]!;
-    const without = all.find(t => !t.valueThemes.includes(theme))!;
+    // a customer none of whose TRs carry the theme
+    const without = all.find(t => !all.some(x => x.customer === t.customer && x.valueThemes.includes(theme)))!;
     const scoped = buildContext({ themes: [theme] });
     expect(scoped.trrCount).toBeGreaterThanOrEqual(1);
     expect(scoped.engagements).toContain(withTheme.customer);

@@ -204,7 +204,7 @@ export function saveDraftText(trrId: string, cycleDue: string, text: string): Tr
   });
 }
 
-const POSTED_MARK = (cycleDue: string) => `Weekly update posted for cycle ${cycleDue}`;
+export const POSTED_MARK = (cycleDue: string) => `Weekly update posted for cycle ${cycleDue}`;
 
 /** Mark posted; optionally record it on the TR as an official-record note. */
 export function postUpdate(id: number): TrUpdate | null {
