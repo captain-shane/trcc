@@ -10,6 +10,8 @@ that a user can observe are **minor**, not patch.
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-10-07
+
 ### Added
 - **🤖 Regenerate on posted updates** (Update Desk): moves the update back to
   draft, removes its logged record note and redrafts it with AI — handy after
@@ -22,7 +24,8 @@ that a user can observe are **minor**, not patch.
   model guessing one.
 
 ### Changed
-- **Demo data** is now a full showcase: 11 customers, 15 opportunities, parent
+- **Demo data** (the `main` flavor; `palo-alto` keeps its earlier demo for
+  now) is now a full showcase: 11 customers, 15 opportunities, parent
   TRs with child requests, the whole health spread, project-management notes
   on parents, flagged and linked logs, an applied import, four weekly cycles of
   updates (posted, drafts, due and overdue), summaries to date with earlier
