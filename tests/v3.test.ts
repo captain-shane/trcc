@@ -13,7 +13,7 @@ const { seedIfEmpty } = await import('../src/db/seed.js');
 const upd = await import('../src/services/updates.js');
 const cyc = await import('../src/services/cycle.js');
 const { planSummary } = await import('../src/services/summary.js');
-const { uid } = await import('../src/types.js');
+const { uid, rag } = await import('../src/types.js');
 type NewTrr = import('../src/types.js').NewTrr;
 
 const base = (over: Partial<NewTrr> = {}): NewTrr => ({
@@ -244,6 +244,42 @@ describe('update desk', () => {
     expect(u!.text).not.toBe('old format');
     expect(repo.listInteractions(t.id).filter(i => i.source === 'update')).toHaveLength(0);
   });
+
+  it('"not mine" takes a child off the cycle (discarding its draft) and putting it back restores it', async () => {
+    const p = base({ customer: 'Skip Co', title: 'parent' }); repo.insertTrr(p);
+    const mine = base({ customer: 'Skip Co', title: 'mine', parentId: p.id }); repo.insertTrr(mine);
+    const theirs = base({ customer: 'Skip Co', title: 'theirs', parentId: p.id }); repo.insertTrr(theirs);
+    log(theirs.id, 1);
+    await upd.draftUpdate(theirs.id, due());
+
+    upd.skipWeekly(theirs.id, due());
+    expect(upd.deskRow(theirs.id)).toBeNull();
+    expect(repo.getUpdate(theirs.id, due())).toBeNull();
+    expect(upd.deskRow(mine.id)).not.toBeNull();
+    expect(upd.offCycle().map(t => t.id)).toContain(theirs.id);
+    expect(upd.offCycle().map(t => t.id)).not.toContain(p.id); // a parent is off by default, not listed
+    expect(repo.listHistory(theirs.id).some(h => h.field === 'weekly update' && h.newValue === 'none')).toBe(true);
+    expect(upd.aggregateText(upd.buildDesk())).not.toContain('theirs');
+
+    upd.includeWeekly(theirs.id);
+    expect(repo.getTrr(theirs.id)!.updateCadence).toBe('');
+    expect(upd.deskRow(theirs.id)).not.toBeNull();
+
+    // A parent put back gets the cadence explicitly: its default is to report through its children.
+    upd.includeWeekly(p.id);
+    expect(repo.getTrr(p.id)!.updateCadence).toBe('weekly');
+    expect(upd.deskRow(p.id)).not.toBeNull();
+  });
+
+  it('a TR posted this cycle stays on the desk when taken off, and is gone from the next cycle', async () => {
+    const t = base({ customer: 'Skip Co', title: 'posted then skipped' }); repo.insertTrr(t);
+    log(t.id, 1);
+    const d = await upd.draftUpdate(t.id, due());
+    upd.postUpdate(d.id);
+    upd.skipWeekly(t.id, due());
+    expect(upd.deskRow(t.id, due())!.state).toBe('posted');
+    expect(upd.deskRow(t.id, cyc.addDays(due(), 7))).toBeNull();
+  });
 });
 
 describe('summary planning', () => {
@@ -358,6 +394,62 @@ describe('dashboard views', () => {
     for (const p of parents) expect(reqs).not.toContain(`href="/trr/${p.id}"`);
     for (const c of active.filter(t => t.parentId)) expect(reqs).toContain(`href="/trr/${c.id}"`);
     expect(reqs).toContain('part of #');
+  });
+
+  it('counts requests, not the parents that wrap them, and opens on the chosen default view', async () => {
+    const views = await import('../src/views/pages.js');
+    repo.eraseAllData();
+    seedIfEmpty();
+    const active = repo.withFamilyActivity(repo.listTrrs('active'));
+    const kids = repo.childrenIndex(active);
+    const ctx = (group: 'family' | 'tree') => ({
+      group, kids, updatesDue: 0, cycleDue: '2026-10-08',
+      opps: new Map(repo.listOpportunities().map(o => [o.id, o])),
+      customers: new Map(repo.listCustomers().map(c => [c.id, c])),
+    });
+    const work = active.filter(t => !kids.get(t.id)?.length);
+    expect(work.length).toBeLessThan(active.length);
+    const tileValue = (html: string, label: string) =>
+      Number(html.match(new RegExp(`tile-value[^>]*>(\\d+)</div>\\s*<div class="tile-label">${label}<`))?.[1]);
+
+    let s: import('../src/types.js').Settings = { ...repo.getSettings(), dashboardView: 'family' };
+    const dash = views.dashboard(active, new Map(), s, 'all', 0, ctx('family'));
+    expect(tileValue(dash, 'Requests')).toBe(work.length);
+    const live = work.filter(t => !t.deactivated);
+    const red = live.filter(t => rag(t.lastContact, s) === 'red').length;
+    const { RAG_SYMBOL } = await import('../src/views/html.js');
+    expect(tileValue(dash, `${RAG_SYMBOL.red} Stalled`)).toBe(red);
+    expect(dash).toContain('★ default');
+    expect(dash).toContain('href="/?g=tree"'); // non-default views carry ?g=
+    expect(dash).not.toContain('href="/?g=family"');
+
+    s = { ...s, dashboardView: 'tree' };
+    const tree = views.dashboard(active, new Map(), s, 'all', 0, ctx('tree'));
+    expect(tree).toContain('★ default');
+    expect(tree).toContain('href="/?g=family"');
+    expect(tree).toMatch(/\d+ opps? · \d+ requests?/);
+    expect(tree).not.toMatch(/\d+ TRs?</);
+
+    const fam = views.dashboard(active, new Map(), s, 'all', 0, ctx('family'));
+    expect(fam).toContain('☆ Make default');
+  });
+
+  it('a health filter picks requests and brings their parents along for the tree', async () => {
+    const views = await import('../src/views/pages.js');
+    repo.eraseAllData();
+    const p = base({ customer: 'Filter Co', title: 'wrapper' }); repo.insertTrr(p);
+    const stale = base({ customer: 'Filter Co', title: 'stale kid', parentId: p.id }); repo.insertTrr(stale);
+    const fresh = base({ customer: 'Filter Co', title: 'fresh kid', parentId: p.id, lastContact: new Date().toISOString() }); repo.insertTrr(fresh);
+    const active = repo.withFamilyActivity(repo.listTrrs('active'));
+    const kids = repo.childrenIndex(active);
+    const s = repo.getSettings();
+    const html = views.dashboard(active, new Map(), s, 'red', 0, {
+      group: 'tree', kids, updatesDue: 0, cycleDue: '2026-10-08',
+      opps: new Map(), customers: new Map(repo.listCustomers().map(c => [c.id, c])),
+    });
+    expect(html).toContain(`href="/trr/${stale.id}"`);
+    expect(html).toContain(`href="/trr/${p.id}"`);
+    expect(html).not.toContain(`href="/trr/${fresh.id}"`);
   });
 });
 

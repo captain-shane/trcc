@@ -1,5 +1,5 @@
 import type { Customer, Interaction, Opportunity, ScopeSummary, Settings, StoredDigest, Trr, TrrHistoryEntry } from '../types.js';
-import { COMPLEXITIES, PRIORITIES, daysSince, rag, type Rag } from '../types.js';
+import { COMPLEXITIES, DASHBOARD_VIEWS, PRIORITIES, daysSince, rag, type DashboardView, type Rag } from '../types.js';
 import type { Desk, DeskRow } from '../services/updates.js';
 import { WEEKDAYS, addDays, daysBetween, localDay, shortDay } from '../services/cycle.js';
 import type { PeriodDigest } from '../services/digest.js';
@@ -33,7 +33,7 @@ function backlogBanner(backlog: number, aiEnabled: boolean): string {
 }
 
 export interface DashCtx {
-  group: 'family' | 'grid' | 'tree' | 'flat';
+  group: DashboardView;
   opps: Map<string, Opportunity>;
   customers: Map<string, Customer>;
   kids: Map<string, Trr[]>;       // parentId -> children (all active TRs)
@@ -41,6 +41,10 @@ export interface DashCtx {
   v2Pending?: boolean;             // upgraded from 2.x and the restructure wizard not yet run
   cycleDue: string;
 }
+
+const DASHBOARD_VIEW_LABEL: Record<DashboardView, string> = {
+  family: 'Families', grid: 'Customer grid', tree: 'Tree', flat: 'Requests',
+};
 
 // --- Dashboard by customer: grid of account tiles, or a collapsible tree ------
 
@@ -56,9 +60,21 @@ interface CustGroup {
 
 const RAG_ORDER: Record<Rag, number> = { red: 0, yellow: 1, green: 2 };
 
-function tallyOf(list: Trr[], s: Settings): Record<Rag, number> {
+/** A parent with children is the project-management wrapper: its children carry the work, so counts skip it. */
+function isWrapper(t: Trr, ctx: Pick<DashCtx, 'kids'>): boolean {
+  return (ctx.kids.get(t.id)?.length ?? 0) > 0;
+}
+
+/** Requests under a heading, in words: "2 opps · 3 requests". */
+function workCount(list: Trr[], ctx: Pick<DashCtx, 'kids'>, opps?: number): string {
+  const n = list.filter(t => !isWrapper(t, ctx)).length;
+  const o = opps === undefined ? '' : `${opps} opp${opps === 1 ? '' : 's'} · `;
+  return `${o}${n} request${n === 1 ? '' : 's'}`;
+}
+
+function tallyOf(list: Trr[], s: Settings, ctx: Pick<DashCtx, 'kids'>): Record<Rag, number> {
   const t = { red: 0, yellow: 0, green: 0 };
-  for (const x of list) if (!x.deactivated && !s.closedStatuses.includes(x.status)) t[rag(x.lastContact, s)]++;
+  for (const x of list) if (!isWrapper(x, ctx) && !x.deactivated && !s.closedStatuses.includes(x.status)) t[rag(x.lastContact, s)]++;
   return t;
 }
 
@@ -81,7 +97,7 @@ function customerGroups(list: Trr[], ctx: DashCtx, s: Settings): CustGroup[] {
     const worst = worstRag(trrs, s);
     return {
       key, name: trrs[0]!.customer, customer: ctx.customers.get(key), trrs, worst,
-      tally: tallyOf(trrs, s),
+      tally: tallyOf(trrs, s, ctx),
       latest: trrs.reduce((a, t) => (t.lastContact > a ? t.lastContact : a), ''),
     };
   }).sort((a, b) =>
@@ -119,6 +135,7 @@ function dashRow(t: Trr, child: boolean, ints: IntsByTrr, s: Settings, wide: boo
     ${child ? '<span class="muted3" aria-hidden="true">↳</span>' : ''}
     <span class="trr-num">#${t.num}</span>${trIdBadge(t)}
     <span class="tree-title">${esc(t.title)}</span>
+    ${t.updateCadence === 'none' ? '<span class="small muted3" title="Off the weekly update cycle: tracked, no update owed">⊘</span>' : ''}
     ${wide && last ? `<span class="small muted2 dash-last" title="${esc(last.note.slice(0, 300))}">${esc(last.type)} · ${esc(last.sensitive ? '🚩 flagged' : last.note.slice(0, 60))}</span>` : ''}
     ${statusBadge(t.status)}
     ${wide ? `<span class="dash-pri">${priorityBadge(t.priority)}</span>${t.myRole ? badge(t.myRole, 'role') : ''}<span class="small muted2 dash-logs">${its.length} log${its.length === 1 ? '' : 's'}</span>` : ''}
@@ -149,10 +166,10 @@ function custTile(g: CustGroup, ctx: DashCtx, ints: IntsByTrr, s: Settings): str
       <a href="${g.customer ? `/customer/${esc(g.customer.id)}` : '#'}"><strong class="lg">${esc(g.name)}</strong></a>
       <span class="row small muted2">${tallyHtml(g.tally)}${newTrLink(g)}</span>
     </div>
-    <div class="small muted2">${g.trrs.length} TR${g.trrs.length === 1 ? '' : 's'} · ${sections.filter(x => x.opp).length} opp${sections.filter(x => x.opp).length === 1 ? '' : 's'}${g.latest ? ` · last contact ${daysSince(g.latest)}d ago` : ''}</div>
+    <div class="small muted2">${workCount(g.trrs, ctx, sections.filter(x => x.opp).length)}${g.latest ? ` · last contact ${daysSince(g.latest)}d ago` : ''}</div>
     ${sections.map(sec => `
       ${multi ? `<div class="tree-opp row-between">${sec.opp
-        ? `<span><a href="/opp/${esc(sec.opp.id)}">◇ ${esc(sec.opp.name)}</a>${sec.opp.stage ? ` <span class="small muted2">${esc(sec.opp.stage)}</span>` : ''}</span>${tallyHtml(tallyOf(sec.trrs, s))}`
+        ? `<span><a href="/opp/${esc(sec.opp.id)}">◇ ${esc(sec.opp.name)}</a>${sec.opp.stage ? ` <span class="small muted2">${esc(sec.opp.stage)}</span>` : ''}</span>${tallyHtml(tallyOf(sec.trrs, s, ctx))}`
         : '<span class="muted2">No opportunity</span>'}</div>` : ''}
       ${familyRows(sec.trrs, ctx, ints, s, false)}`).join('')}
   </section>`;
@@ -160,12 +177,13 @@ function custTile(g: CustGroup, ctx: DashCtx, ints: IntsByTrr, s: Settings): str
 
 function custTree(groups: CustGroup[], ctx: DashCtx, ints: IntsByTrr, s: Settings): string {
   return `
-  <div class="cust-tree card" x-data>
+  <div class="cust-tree card" x-data="{ setAll(open) { $root.querySelectorAll('details.tnode').forEach(d => d.open = open); localStorage.setItem('trcc.treeOpen', open ? '1' : '0'); } }"
+    x-init="if (localStorage.getItem('trcc.treeOpen') === '0') $root.querySelectorAll('details.tnode').forEach(d => d.open = false)">
     <div class="row-between tree-tools">
       <span class="small muted2">${groups.length} customer${groups.length === 1 ? '' : 's'} · Customer › Opportunity › Parent › Child</span>
       <span class="row">
-        <button type="button" class="btn btn-sm btn-outline" @click="$root.querySelectorAll('details.tnode').forEach(d => d.open = true)">Expand all</button>
-        <button type="button" class="btn btn-sm btn-outline" @click="$root.querySelectorAll('details.tnode').forEach(d => d.open = false)">Collapse all</button>
+        <button type="button" class="btn btn-sm btn-outline" @click="setAll(true)">Expand all</button>
+        <button type="button" class="btn btn-sm btn-outline" @click="setAll(false)">Collapse all</button>
       </span>
     </div>
     ${groups.map(g => {
@@ -178,7 +196,7 @@ function custTree(groups: CustGroup[], ctx: DashCtx, ints: IntsByTrr, s: Setting
           ${g.customer ? `<a class="small muted2 tlink" href="/customer/${esc(g.customer.id)}" @click.stop>account ›</a>` : ''}
           <span class="tspacer"></span>
           ${tallyHtml(g.tally)}
-          <span class="small muted2 tcount">${g.trrs.length} TR${g.trrs.length === 1 ? '' : 's'}${g.latest ? ` · ${daysSince(g.latest)}d` : ''}</span>
+          <span class="small muted2 tcount">${workCount(g.trrs, ctx, sections.filter(x => x.opp).length)}${g.latest ? ` · ${daysSince(g.latest)}d` : ''}</span>
           ${newTrLink(g)}
         </summary>
         ${sections.map(sec => sec.opp ? `
@@ -187,7 +205,7 @@ function custTree(groups: CustGroup[], ctx: DashCtx, ints: IntsByTrr, s: Setting
               <span class="tcaret" aria-hidden="true"></span>
               <span>◇ ${esc(sec.opp.name)}</span>${sec.opp.stage ? ` <span class="small muted2">${esc(sec.opp.stage)}</span>` : ''}
               <a class="small muted2 tlink" href="/opp/${esc(sec.opp.id)}" @click.stop>open ›</a>
-              <span class="tspacer"></span>${tallyHtml(tallyOf(sec.trrs, s))}${newTrLink(g, sec.opp)}
+              <span class="tspacer"></span>${tallyHtml(tallyOf(sec.trrs, s, ctx))}<span class="small muted2 tcount">${workCount(sec.trrs, ctx)}</span>${newTrLink(g, sec.opp)}
             </summary>
             <div class="tleaves">${familyRows(sec.trrs, ctx, ints, s, true)}</div>
           </details>` : `
@@ -201,16 +219,21 @@ function custTree(groups: CustGroup[], ctx: DashCtx, ints: IntsByTrr, s: Setting
 }
 
 export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: string, backlog: number, ctx: DashCtx): string {
-  const live = trrs.filter(t => !t.deactivated);
+  // The numbers count requests (children and standalone TRs), not the parents that wrap them.
+  const work = trrs.filter(t => !isWrapper(t, ctx));
   const ct = { red: 0, yellow: 0, green: 0 };
-  for (const t of live) ct[rag(t.lastContact, s)]++;
-  const deact = trrs.filter(t => t.deactivated).length;
+  for (const t of work) if (!t.deactivated) ct[rag(t.lastContact, s)]++;
+  const deact = work.filter(t => t.deactivated).length;
+  const custCount = new Set(trrs.map(t => t.customerId || t.customer)).size;
+  const oppCount = new Set(trrs.map(t => t.opportunityId).filter(Boolean)).size;
 
-  const filtered =
-    filter === 'deact' ? trrs.filter(t => t.deactivated) :
-    filter === 'red' || filter === 'yellow' || filter === 'green'
-      ? trrs.filter(t => !t.deactivated && rag(t.lastContact, s) === filter)
-      : trrs;
+  const matches = (t: Trr) =>
+    filter === 'deact' ? t.deactivated :
+    filter === 'red' || filter === 'yellow' || filter === 'green' ? !t.deactivated && rag(t.lastContact, s) === filter : true;
+  // A filter picks requests; their parents come along so the grid and tree keep their shape.
+  const hits = new Set(work.filter(matches).map(t => t.id));
+  const parentsOfHits = new Set(trrs.filter(t => hits.has(t.id) && t.parentId).map(t => t.parentId));
+  const filtered = filter === 'all' ? trrs : trrs.filter(t => hits.has(t.id) || parentsOfHits.has(t.id));
 
   const order = { red: 0, yellow: 1, green: 2 };
   const byHealth = (a: Trr, b: Trr) => {
@@ -222,7 +245,7 @@ export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: str
   const qs = (k: string, v: string) => {
     const p = new URLSearchParams({ f: filter, g: ctx.group, [k]: v });
     if (p.get('f') === 'all') p.delete('f');
-    if (p.get('g') === 'family') p.delete('g');
+    if (p.get('g') === s.dashboardView) p.delete('g');
     const str = p.toString();
     return str ? `/?${str}` : '/';
   };
@@ -271,7 +294,11 @@ export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: str
     ${tile('yellow', `${RAG_SYMBOL.yellow} Aging`, ct.yellow, 'var(--yellow)')}
     ${tile('green', `${RAG_SYMBOL.green} Active`, ct.green, 'var(--green)')}
     ${tile('deact', 'Deactivated', deact, 'var(--muted2)')}
-    ${tile('all', 'Total', trrs.length, 'var(--text)')}
+    ${tile('all', 'Requests', work.length, 'var(--text)')}
+    <a class="tile tile-link" href="${qs('g', 'tree')}" title="Customers and opportunities with open requests">
+      <div class="tile-value">${custCount}<span class="muted2 tile-sub"> · ${oppCount}</span></div>
+      <div class="tile-label">Customers · Opps</div>
+    </a>
     <a class="tile tile-link" href="/updates" title="Weekly updates due ${esc(ctx.cycleDue)}">
       <div class="tile-value" style="color:${ctx.updatesDue ? 'var(--yellow)' : 'var(--green)'}">${ctx.updatesDue}</div>
       <div class="tile-label">${ctx.updatesDue ? '▲' : '●'} Updates due ${esc(shortDay(ctx.cycleDue))}</div>
@@ -285,6 +312,9 @@ export function dashboard(trrs: Trr[], ints: IntsByTrr, s: Settings, filter: str
       <div class="segmented" role="group" aria-label="Group by">
         ${gbtn('family', 'Families')}${gbtn('grid', '▦ Customer grid')}${gbtn('tree', '🌳 Tree')}${gbtn('flat', 'Requests')}
       </div>
+      ${ctx.group === s.dashboardView
+        ? '<span class="small muted2" title="The dashboard opens on this view (change it in Settings)">★ default</span>'
+        : `<form method="post" action="/settings/dashboard-view"><input type="hidden" name="view" value="${ctx.group}"><button class="btn btn-outline btn-sm" type="submit" title="Open the dashboard on this view">☆ Make default</button></form>`}
     </div>
     ${sorted.length === 0 ? '<div class="card muted center">No TRs match.</div>' : ''}
     ${body}
@@ -512,7 +542,8 @@ function treeRows(list: Trr[], kids: Map<string, Trr[]>, s: Settings): string {
       ${closed || t.deactivated ? '<span class="rag-glyph muted2" aria-label="closed">○</span>' : `<span class="rag-glyph rag-g-${r}" aria-label="${esc(RAG_LABEL[r])}">${RAG_SYMBOL[r]}</span>`}
       ${child ? '<span class="muted3" aria-hidden="true">↳</span>' : ''}
       <span class="trr-num">#${t.num}</span>${trIdBadge(t)}
-      <span class="tree-title">${esc(t.title)}</span>${statusBadge(t.status)}
+      <span class="tree-title">${esc(t.title)}</span>
+    ${t.updateCadence === 'none' ? '<span class="small muted3" title="Off the weekly update cycle: tracked, no update owed">⊘</span>' : ''}${statusBadge(t.status)}
       <span class="small muted2 tree-meta">${t.lastContact ? `${daysSince(t.lastContact)}d` : '—'}</span></a>`;
   };
   return list.filter(t => !t.parentId || !ids.has(t.parentId))
@@ -702,7 +733,7 @@ export function deskSummaryFragment(desk: Desk, counts: Record<string, number>, 
   </div>`;
 }
 
-export function updateDesk(desk: Desk, s: Settings, counts: Record<string, number>, aggregate: string, filter: string): string {
+export function updateDesk(desk: Desk, s: Settings, counts: Record<string, number>, aggregate: string, filter: string, off: Trr[] = []): string {
   const today = localDay();
   const until = daysBetween(today, desk.cycleDue);
   const when = until === 0 ? 'today' : until > 0 ? `in ${until} day${until === 1 ? '' : 's'}` : `${-until} day${until === -1 ? '' : 's'} ago`;
@@ -765,9 +796,19 @@ export function updateDesk(desk: Desk, s: Settings, counts: Record<string, numbe
           head = `<div class="desk-parent"><a href="/trr/${esc(r.parent.id)}"><span class="trr-num">#${r.parent.num}</span> ${trIdBadge(r.parent)} ${esc(r.parent.title)}</a>
             <span class="small ${f.done === f.n ? 'ds-posted' : 'warn'}">${f.done}/${f.n} children covered</span></div>`;
         }
-        return head + updateRowCard(r, desk.cycleDue, s.aiEnabled && desk.current);
+        return head + updateRowCard(r, desk.cycleDue, s.aiEnabled && desk.current, { current: desk.current });
       }).join('')}
     </section>`).join('')}
+  ${off.length ? `
+  <details class="card desk-off">
+    <summary><strong>⊘ Off the weekly cycle (${off.length})</strong> <span class="small muted2">— tracked on the dashboard, no update owed</span></summary>
+    <div class="small muted2" style="margin:6px 0">Taken off with “⊘ Not mine” or set to no weekly update on the edit page. Parents that report through their children are not listed.</div>
+    ${off.map(t => `
+    <div class="row-between wrap desk-off-row">
+      <a href="/trr/${esc(t.id)}"><span class="trr-num">#${t.num}</span> ${trIdBadge(t)} ${esc(t.customer)} — ${esc(t.title)}</a>
+      <button class="btn btn-outline btn-sm" hx-post="/updates/${esc(t.id)}/${esc(desk.cycleDue)}/include?reload=1" hx-swap="none">↺ Put back</button>
+    </div>`).join('')}
+  </details>` : ''}
   `);
 }
 
@@ -1297,6 +1338,7 @@ export function settingsPage(s: Settings, aiUrl: string, models: string[] | null
         ${field('Archive window (days)', `<input type="number" name="archiveDays" value="${s.archiveDays}" min="1">`)}
         ${field('Auto-backfill every (hours, 0 = off)', `<input type="number" name="autoBackfillHours" value="${s.autoBackfillHours}" min="0">`)}
         ${field('Backups to keep', `<input type="number" name="backupKeep" value="${s.backupKeep}" min="1">`)}
+        ${field('Dashboard opens on', `<select name="dashboardView">${DASHBOARD_VIEWS.map(v => `<option value="${v}" ${v === s.dashboardView ? 'selected' : ''}>${DASHBOARD_VIEW_LABEL[v]}</option>`).join('')}</select>`)}
       </div>
       <label class="check"><input type="checkbox" name="autoBackupEnabled" value="1" ${s.autoBackupEnabled ? 'checked' : ''}> Daily automatic database backup</label>
       <div class="small muted2">Auto-backfill drains the exec-summary backlog in the background on this schedule (also runs shortly after startup).</div>

@@ -107,6 +107,10 @@ export const UPDATE_CADENCES = ['weekly', 'biweekly', 'none'] as const;
 export type UpdateCadence = (typeof UPDATE_CADENCES)[number];
 export const CADENCE_DAYS: Record<UpdateCadence, number> = { weekly: 7, biweekly: 14, none: 0 };
 
+/** Dashboard views: families of cards, the customer grid, the collapsible tree, the flat request list. */
+export const DASHBOARD_VIEWS = ['family', 'grid', 'tree', 'flat'] as const;
+export type DashboardView = (typeof DASHBOARD_VIEWS)[number];
+
 /** One weekly (per-cycle) update for one TR ID. */
 export interface TrUpdate {
   id: number;
@@ -196,6 +200,7 @@ export interface Settings {
   updateDueWeekday: number;      // 0=Sun … 6=Sat; default 4 (Thursday)
   updateCadence: UpdateCadence;  // default cadence for TRs that don't set their own
   logPostedUpdates: boolean;     // posting an update also logs it as an official-record note
+  dashboardView: DashboardView;  // the view the dashboard opens on
   updateTmpl: string;    // weekly update: combine the entries in the window into one status
   summaryTmpl: string;   // summary to date (full or incremental) for a TR / family / opportunity / customer
   custTmpl: string;

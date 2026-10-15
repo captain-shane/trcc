@@ -135,6 +135,7 @@ const TRACKED: { key: keyof Trr; label: string }[] = [
   { key: 'myRole', label: 'my role' },
   { key: 'outcome', label: 'outcome' },
   { key: 'externalId', label: 'TR ID' },
+  { key: 'updateCadence', label: 'weekly update' },
   { key: 'customer', label: 'customer' },
 ];
 
@@ -960,6 +961,7 @@ export function defaultSettings(): Settings {
     updateDueWeekday: 4,
     updateCadence: 'weekly',
     logPostedUpdates: true,
+    dashboardView: 'family',
     updateTmpl: DEFAULT_UPDATE_TMPL,
     summaryTmpl: DEFAULT_SUMMARY_TMPL,
     custTmpl: DEFAULT_CUST_TMPL,
@@ -985,7 +987,7 @@ const SETTINGS_KEYS = new Set<keyof Settings>([
   'roles', 'outcomes', 'themes', 'officialTag',
   'model', 'digestModel', 'embedModel',
   'ctxTokens', 'fastCtxTokens', 'reviewReserveTokens', 'reviewMaxCalls', 'questionSets',
-  'updateDueWeekday', 'updateCadence', 'logPostedUpdates', 'updateTmpl', 'summaryTmpl',
+  'updateDueWeekday', 'updateCadence', 'logPostedUpdates', 'dashboardView', 'updateTmpl', 'summaryTmpl',
   'custTmpl', 'execTmpl', 'evalTmpl', 'trrDigestTmpl', 'reviewTmpl', 'reviewMapTmpl',
 ]);
 

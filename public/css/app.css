@@ -204,6 +204,7 @@ input:focus, select:focus, textarea:focus { outline: 1px solid var(--blue); }
 }
 .tile-link:hover, .tile-link.active { border-color: var(--blue); }
 .tile-value { font-size: 22px; font-weight: 700; color: var(--text); }
+.tile-sub { font-size: 15px; font-weight: 600; }
 .tile-label { font-size: 10.5px; color: var(--muted2); font-weight: 600; }
 
 .hbar { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
@@ -384,6 +385,10 @@ details[open] > summary { margin-bottom: 8px; }
 .ds-notdue-row { opacity: .6; }
 .upd-text { margin: 8px 0 4px; white-space: pre-wrap; }
 .upd-actions { margin-top: 6px; }
+.upd-actions .upd-skip { margin-left: auto; }
+.upd-skipped { opacity: .8; padding-top: 8px; padding-bottom: 8px; }
+.desk-off { margin-top: 14px; }
+.desk-off-row { padding: 5px 0; border-top: 1px solid var(--c2); }
 .upd-entry { padding: 3px 0; border-top: 1px solid var(--c2); }
 .upd-hist { margin: 6px 0; }
 .btn.btn-post { background: var(--green); color: #06220f; }
