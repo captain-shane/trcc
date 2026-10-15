@@ -10,6 +10,8 @@ that a user can observe are **minor**, not patch.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-15
+
 ### Added
 - Update Desk: **⊘ Not mine** on each row takes a TR off the weekly cycle
   (cadence "none"). It stays tracked on the dashboard and keeps its history;
