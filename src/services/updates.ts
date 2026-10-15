@@ -121,6 +121,32 @@ export function deskRow(trrId: string, cycleDue?: string): DeskRow | null {
   return buildDesk(cycleDue).rows.find(r => r.trr.id === trrId) ?? null;
 }
 
+// --- Who owes updates ---------------------------------------------------------
+
+/** Take a TR off the weekly cycle (cadence 'none'). This cycle's unposted draft goes with it. */
+export function skipWeekly(trrId: string, cycleDue: string): void {
+  repo.updateTrr(trrId, { updateCadence: 'none' });
+  const u = repo.getUpdate(trrId, cycleDue);
+  if (u?.status === 'draft') repo.deleteUpdate(u.id);
+}
+
+/** Put a TR back on the cycle. A parent's default is 'none', so it gets the Settings cadence explicitly. */
+export function includeWeekly(trrId: string): void {
+  const t = repo.getTrr(trrId);
+  if (!t) return;
+  const s = repo.getSettings();
+  const hasChildren = repo.listTrrs('all').some(x => x.parentId === t.id);
+  const cadence = s.updateCadence === 'none' ? 'weekly' : s.updateCadence;
+  repo.updateTrr(trrId, { updateCadence: hasChildren || s.updateCadence === 'none' ? cadence : '' });
+}
+
+/** Open TRs taken off the cycle by hand (parents that report through their children are not listed). */
+export function offCycle(): Trr[] {
+  const s = repo.getSettings();
+  return repo.listTrrs('all').filter(t =>
+    t.updateCadence === 'none' && !t.deactivated && !s.closedStatuses.includes(t.status));
+}
+
 // --- Drafting ------------------------------------------------------------------
 
 const ENTRY_CHARS = 1_400;

@@ -10,6 +10,24 @@ that a user can observe are **minor**, not patch.
 
 ## [Unreleased]
 
+### Added
+- Update Desk: **⊘ Not mine** on each row takes a TR off the weekly cycle
+  (cadence "none"). It stays tracked on the dashboard and keeps its history;
+  this cycle's unposted draft is discarded. An **Off the weekly cycle** list at
+  the bottom of the desk puts any of them back. The change is recorded in the
+  TR's audit trail ("weekly update"), and the tree marks off-cycle TRs with ⊘.
+- Dashboard default view: **☆ Make default** next to the view switcher, or
+  *Settings → Dashboard opens on* (Families, Customer grid, Tree, Requests).
+  The tree also remembers Collapse all / Expand all per browser.
+
+### Changed
+- Dashboard numbers count **requests** (children and standalone TRs), not the
+  parents that wrap them: the health tiles, *Requests* (was *Total*), and the
+  customer/opportunity tallies. A new *Customers · Opps* tile completes the
+  picture, and grid and tree headings read "2 opps · 3 requests".
+- A health filter (Stalled / Aging / Active / Deactivated) picks requests and
+  brings their parents along, so the grid and tree keep their shape.
+
 ### Fixed
 - The 2.x restructure wizard no longer reads the app's own posted-update notes
   when suggesting TR ID shapes or searching logs (they suggested a bogus

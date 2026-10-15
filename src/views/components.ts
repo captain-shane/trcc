@@ -348,7 +348,7 @@ export function deskStateBadge(st: DeskState): string {
   return `<span class="badge ds ${d.cls}" role="img" aria-label="${esc(d.label)}">${d.sym} ${esc(d.label)}</span>`;
 }
 
-export function updateRowCard(r: DeskRow, cycleDue: string, aiEnabled: boolean, opts: { flash?: string; error?: string; edit?: boolean } = {}): string {
+export function updateRowCard(r: DeskRow, cycleDue: string, aiEnabled: boolean, opts: { flash?: string; error?: string; edit?: boolean; current?: boolean } = {}): string {
   const t = r.trr;
   const u = r.update;
   const rid = `upd-${esc(t.id)}`;
@@ -395,6 +395,9 @@ export function updateRowCard(r: DeskRow, cycleDue: string, aiEnabled: boolean, 
       ${u?.status === 'posted' && aiEnabled ? `<button class="btn btn-outline btn-sm" hx-post="/updates/u/${u.id}/regen" hx-target="#${rid}" hx-swap="outerHTML" hx-indicator="#${rid} .upd-ind"
           hx-confirm="Regenerate this posted update with AI? It goes back to draft (the logged record note is removed) — mark it posted again when it reads right.">🤖 Regenerate</button>` : ''}
       ${u?.status === 'posted' ? `<button class="btn btn-outline btn-sm" hx-post="/updates/u/${u.id}/unpost" hx-target="#${rid}" hx-swap="outerHTML" hx-confirm="Move this back to draft? The logged record note is removed.">↶ Unpost</button>` : ''}
+      ${opts.current !== false && r.cadence !== 'none' ? `<button class="btn btn-outline btn-sm upd-skip" hx-post="${base}/skip" hx-target="#${rid}" hx-swap="outerHTML"
+          title="Not yours to report on: keep tracking it, but stop owing a weekly update for it"
+          hx-confirm="Take #${t.num} off the weekly update cycle? It stays on the dashboard and keeps its history.${u?.status === 'draft' ? ' This cycle\'s draft is discarded.' : ''} Put it back from the bottom of the desk or its edit page.">⊘ Not mine</button>` : ''}
       <span class="upd-ind htmx-indicator small muted2">⏳ drafting on local model…</span>
       ${opts.flash ? `<span class="small hl">${esc(opts.flash)}</span>` : ''}
     </div>
@@ -402,6 +405,18 @@ export function updateRowCard(r: DeskRow, cycleDue: string, aiEnabled: boolean, 
     <details class="small"><summary class="muted2">Entries in this window (${r.entries.length})</summary>
       ${r.entries.map(i => `<div class="upd-entry"><span class="muted2">${esc(i.date)} ${esc(i.type)}</span> ${i.sensitive ? '🚩 <em>flagged — not sent to AI</em> · ' : ''}${esc((i.aiExec || i.note).replace(/\s+/g, ' ').slice(0, 220))}</div>`).join('')}
     </details>` : ''}
+  </div>`;
+}
+
+/** What a desk row turns into when its TR is taken off the weekly cycle. */
+export function skippedRowCard(t: Trr, cycleDue: string): string {
+  const rid = `upd-${esc(t.id)}`;
+  return `
+  <div class="card upd-row upd-skipped ${t.parentId ? 'child-card' : ''}" id="${rid}">
+    <div class="row-between wrap">
+      <span class="small muted2">⊘ <a class="trr-num" href="/trr/${esc(t.id)}">#${t.num}</a> ${trIdBadge(t)} ${esc(t.title)} — off the weekly cycle, still tracked on the dashboard.</span>
+      <button class="btn btn-outline btn-sm" hx-post="/updates/${esc(t.id)}/${esc(cycleDue)}/include" hx-target="#${rid}" hx-swap="outerHTML">↶ Undo</button>
+    </div>
   </div>`;
 }
 

@@ -4,7 +4,7 @@ import * as views from '../views/pages.js';
 import { serverInfo } from '../services/ai.js';
 import { config } from '../config.js';
 import { daysSince, rag, type Interaction, type Trr } from '../types.js';
-import { buildDesk, aggregateText, deskCounts, currentCycleDue, deskRow } from '../services/updates.js';
+import { buildDesk, aggregateText, deskCounts, currentCycleDue, deskRow, offCycle } from '../services/updates.js';
 import { isValidDay } from '../services/cycle.js';
 import type { TrrFormCtx } from '../views/components.js';
 
@@ -38,11 +38,11 @@ function intsByTrr(): Map<string, Interaction[]> {
 
 pages.get('/', (req, res) => {
   const filter = String(req.query.f ?? 'all');
-  const g = String(req.query.g ?? 'family');
+  const s = repo.getSettings();
+  const g = String(req.query.g ?? s.dashboardView);
   // 'customer' was the 2.x/3.0-beta name of the grid view — keep old links working
   const group = g === 'customer' || g === 'grid' ? 'grid' : g === 'tree' || g === 'flat' ? g : 'family';
   const backlog = repo.interactionsNeedingExec(500).length;
-  const s = repo.getSettings();
   const active = repo.withFamilyActivity(repo.listTrrs('active'));
   const desk = buildDesk();
   const c = deskCounts(desk);
@@ -162,7 +162,7 @@ pages.get('/updates', (req, res) => {
   const desk = buildDesk(isValidDay(q) ? q : undefined);
   const f = String(req.query.f ?? 'all');
   res.send(views.updateDesk(desk, repo.getSettings(), deskCounts(desk), aggregateText(desk),
-    ['needs', 'posted', 'quiet'].includes(f) ? f : 'all'));
+    ['needs', 'posted', 'quiet'].includes(f) ? f : 'all', offCycle()));
 });
 
 pages.get('/archive', (_req, res) => {

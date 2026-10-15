@@ -1,14 +1,14 @@
 import { Router } from 'express';
 import * as repo from '../db/repo.js';
 import * as views from '../views/pages.js';
-import { interactionCard, digestBlock, errorBox, jobProgress, summaryBlock, trrLinksFragment, updateRowCard } from '../views/components.js';
+import { interactionCard, digestBlock, errorBox, jobProgress, skippedRowCard, summaryBlock, trrLinksFragment, updateRowCard } from '../views/components.js';
 import { formCtx } from './pages.js';
 import { HierarchyError } from '../db/repo.js';
 import { getJob } from '../services/jobs.js';
 import { planSummary, startSummaryJob } from '../services/summary.js';
 import {
-  aggregateText, buildDesk, deskCounts, deskRow, draftUpdate, plainDraft, postUpdate, regenerateUpdate,
-  saveDraftText, startBulkDrafts, unpostUpdate,
+  aggregateText, buildDesk, deskCounts, deskRow, draftUpdate, includeWeekly, plainDraft, postUpdate, regenerateUpdate,
+  saveDraftText, skipWeekly, startBulkDrafts, unpostUpdate,
 } from '../services/updates.js';
 import { isValidDay } from '../services/cycle.js';
 import { enrichExecSummaries, periodDigest, queueArchivalDigest, trrDigest } from '../services/digest.js';
@@ -17,7 +17,7 @@ import { getReviewJob, startReview } from '../services/reviewJob.js';
 import { fillTemplate, generate } from '../services/ai.js';
 import { semanticSearch, textSearch } from '../services/search.js';
 import {
-  COMPLEXITIES, INTERACTION_TYPES, PRIORITIES, UPDATE_CADENCES,
+  COMPLEXITIES, DASHBOARD_VIEWS, INTERACTION_TYPES, PRIORITIES, UPDATE_CADENCES,
   uid, type Interaction, type NewTrr, type Settings, type SummaryScopeKind, type Trr,
 } from '../types.js';
 import { esc } from '../views/html.js';
@@ -517,10 +517,18 @@ actions.post('/settings', (req, res) => {
     updateDueWeekday: Math.min(6, num(b.updateDueWeekday, cur.updateDueWeekday, 0)),
     updateCadence: pickStr(b.updateCadence, [...UPDATE_CADENCES], cur.updateCadence) as Settings['updateCadence'],
     logPostedUpdates: b.logPostedUpdates === '1',
+    dashboardView: pickStr(b.dashboardView, [...DASHBOARD_VIEWS], cur.dashboardView) as Settings['dashboardView'],
     updateTmpl: str(b.updateTmpl, 50_000) || cur.updateTmpl,
     summaryTmpl: str(b.summaryTmpl, 50_000) || cur.summaryTmpl,
   });
   res.redirect(303, '/settings');
+});
+
+actions.post('/settings/dashboard-view', (req, res) => {
+  const cur = repo.getSettings();
+  const view = pickStr((req.body as Record<string, unknown>).view, [...DASHBOARD_VIEWS], cur.dashboardView);
+  repo.saveSettings({ dashboardView: view as Settings['dashboardView'] });
+  res.redirect(303, '/');
 });
 
 // --- Customers & opportunities ------------------------------------------------
@@ -640,7 +648,7 @@ function sendRow(res: import('express').Response, trrId: string, cycleDue: strin
   res.setHeader('HX-Trigger', 'desk-changed');
   if (!row) return void res.send(errorBox(opts.error ?? 'This TR is no longer on the desk for that cycle.'));
   const desk = buildDesk(cycleDue);
-  res.send(updateRowCard(row, cycleDue, repo.getSettings().aiEnabled && desk.current, opts));
+  res.send(updateRowCard(row, cycleDue, repo.getSettings().aiEnabled && desk.current, { ...opts, current: desk.current }));
 }
 
 actions.post('/updates/:trrId/:cycle/draft', async (req, res) => {
@@ -691,6 +699,33 @@ actions.post('/updates/u/:id/unpost', (req, res) => {
   if (!u) return res.status(404).send('');
   unpostUpdate(u.id);
   sendRow(res, u.trrId, u.cycleDue, { flash: 'back to draft' });
+});
+
+actions.post('/updates/:trrId/:cycle/skip', (req, res) => {
+  const cycle = cycleParam(req.params.cycle);
+  if (!cycle) return res.status(400).send('');
+  const t = repo.getTrr(req.params.trrId);
+  if (!t) return res.status(404).send('');
+  skipWeekly(t.id, cycle);
+  // Posted this cycle: the row stays, and the TR is off the cycle from the next one.
+  if (deskRow(t.id, cycle)) return sendRow(res, t.id, cycle, { flash: 'off the weekly cycle from the next cycle' });
+  res.setHeader('HX-Trigger', 'desk-changed');
+  res.send(skippedRowCard(t, cycle));
+});
+
+actions.post('/updates/:trrId/:cycle/include', (req, res) => {
+  const cycle = cycleParam(req.params.cycle);
+  if (!cycle) return res.status(400).send('');
+  const t = repo.getTrr(req.params.trrId);
+  if (!t) return res.status(404).send('');
+  includeWeekly(t.id);
+  if (req.query.reload === '1') {
+    res.setHeader('HX-Refresh', 'true');
+    return res.send('');
+  }
+  if (deskRow(t.id, cycle)) return sendRow(res, t.id, cycle, { flash: 'back on the weekly cycle' });
+  res.setHeader('HX-Trigger', 'desk-changed');
+  res.send(`<div class="card small muted2">#${t.num} is back on the weekly cycle.</div>`);
 });
 
 actions.post('/updates/bulk', (req, res) => {
